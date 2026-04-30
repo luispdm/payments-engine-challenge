@@ -80,10 +80,9 @@ impl Engine {
                 let Entry::Vacant(slot) = self.txs.entry(tx) else {
                     return Err(EngineError::DuplicateTxId { client, tx });
                 };
-                // Insert before mutating the account; deposits have no
-                // apply-time failure mode (unlike `apply_withdrawal`), so
-                // the order is purely for symmetry with the withdrawal
-                // handler's deliberate id-reserve-before-debit ordering.
+                // Insert before mutating the account: deposits can't fail
+                // so the order is purely for symmetry with the withdrawal
+                // handler
                 slot.insert(TxRecord::Deposit(DepositRecord::new(client, amount)));
                 self.accounts
                     .entry(client)
