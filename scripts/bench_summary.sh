@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run the data-structure benches and emit a markdown summary table for the
-# README.
+# Run the data-structure benches and emit a markdown summary table for
+# `docs/data-structures-benchmarks.md`.
 #
 # Usage:
 #   scripts/bench_summary.sh             run benches + memory bins, print table
