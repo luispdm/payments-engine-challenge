@@ -84,7 +84,9 @@ impl TryFrom<RawTransaction> for Transaction {
             amount,
         } = raw;
 
-        match kind.as_str() {
+        // Match on the lowercased kind so `Deposit`, `WITHDRAWAL`, etc. do not
+        // silently get dropped as `UnknownTransactionType` by the driver loop.
+        match kind.to_ascii_lowercase().as_str() {
             "deposit" => {
                 let amount = amount.ok_or(EngineError::MissingAmount { tx })?;
                 Ok(Transaction::Deposit { client, tx, amount })
@@ -175,5 +177,19 @@ mod tests {
         let err = Transaction::try_from(raw("transfer", None)).unwrap_err();
 
         assert!(matches!(err, EngineError::UnknownTransactionType { .. }));
+    }
+
+    #[test]
+    fn try_from_should_accept_uppercase_kind() {
+        let tx = Transaction::try_from(raw("DEPOSIT", Some("1.0000"))).unwrap();
+
+        assert!(matches!(tx, Transaction::Deposit { .. }));
+    }
+
+    #[test]
+    fn try_from_should_accept_mixed_case_kind() {
+        let tx = Transaction::try_from(raw("ChargeBack", None)).unwrap();
+
+        assert_eq!(tx, Transaction::Chargeback { client: 1, tx: 42 });
     }
 }

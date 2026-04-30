@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 pub mod account;
 pub mod error;
-pub mod io;
+pub(crate) mod io;
 pub mod transaction;
 
 use account::Account;
@@ -66,23 +66,43 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn process_should_credit_available_and_total_when_deposit() {
+    fn process_one_deposit(client: u16, tx: u32, amount: &str) -> Engine {
         let mut engine = Engine::new();
-        let amount: Decimal = "12.3456".parse().unwrap();
-
         engine
             .process(Transaction::Deposit {
-                client: 1,
-                tx: 1,
-                amount,
+                client,
+                tx,
+                amount: amount.parse().unwrap(),
             })
             .unwrap();
+        engine
+    }
 
-        let acct = engine.accounts.get(&1).unwrap();
-        assert_eq!(acct.available, amount);
-        assert_eq!(acct.total, amount);
-        assert_eq!(acct.held, Decimal::ZERO);
+    #[test]
+    fn process_should_credit_available_when_deposit() {
+        let engine = process_one_deposit(1, 1, "12.3456");
+
+        assert_eq!(
+            engine.accounts.get(&1).unwrap().available(),
+            "12.3456".parse::<Decimal>().unwrap(),
+        );
+    }
+
+    #[test]
+    fn process_should_increase_total_by_amount_when_deposit() {
+        let engine = process_one_deposit(1, 1, "12.3456");
+
+        assert_eq!(
+            engine.accounts.get(&1).unwrap().total(),
+            "12.3456".parse::<Decimal>().unwrap(),
+        );
+    }
+
+    #[test]
+    fn process_should_leave_held_unchanged_when_deposit() {
+        let engine = process_one_deposit(1, 1, "12.3456");
+
+        assert_eq!(engine.accounts.get(&1).unwrap().held(), Decimal::ZERO);
     }
 
     #[test]
@@ -120,7 +140,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            engine.accounts.get(&1).unwrap().available,
+            engine.accounts.get(&1).unwrap().available(),
             "3.5000".parse::<Decimal>().unwrap()
         );
     }

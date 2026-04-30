@@ -47,11 +47,11 @@ fn write_snapshots<W: Write>(engine: &Engine, output: W) -> anyhow::Result<()> {
     wtr.write_record(["client", "available", "held", "total", "locked"])?;
     for acct in engine.accounts() {
         wtr.write_record([
-            acct.client.to_string(),
-            format!("{:.4}", acct.available),
-            format!("{:.4}", acct.held),
-            format!("{:.4}", acct.total),
-            acct.locked.to_string(),
+            acct.client().to_string(),
+            format!("{:.4}", acct.available()),
+            format!("{:.4}", acct.held()),
+            format!("{:.4}", acct.total()),
+            acct.locked().to_string(),
         ])?;
     }
     wtr.flush()?;
@@ -78,7 +78,7 @@ mod tests {
         );
 
         let acct = engine.accounts().next().unwrap();
-        assert_eq!(acct.available, "10.0000".parse::<Decimal>().unwrap());
+        assert_eq!(acct.available(), "10.0000".parse::<Decimal>().unwrap());
     }
 
     #[test]
@@ -89,7 +89,7 @@ mod tests {
         );
 
         let acct = engine.accounts().next().unwrap();
-        assert_eq!(acct.available, "0.0001".parse::<Decimal>().unwrap());
+        assert_eq!(acct.available(), "0.0001".parse::<Decimal>().unwrap());
     }
 
     #[test]
@@ -101,8 +101,8 @@ mod tests {
         );
 
         let acct = engine.accounts().next().unwrap();
-        assert_eq!(acct.client, 1);
-        assert_eq!(acct.available, "3.0000".parse::<Decimal>().unwrap());
+        assert_eq!(acct.client(), 1);
+        assert_eq!(acct.available(), "3.0000".parse::<Decimal>().unwrap());
     }
 
     #[test]
@@ -114,7 +114,7 @@ mod tests {
         );
 
         let acct = engine.accounts().next().unwrap();
-        assert_eq!(acct.available, "4.0000".parse::<Decimal>().unwrap());
+        assert_eq!(acct.available(), "4.0000".parse::<Decimal>().unwrap());
     }
 
     #[test]
