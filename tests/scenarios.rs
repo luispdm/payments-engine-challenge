@@ -124,3 +124,51 @@ withdrawal,2,6,1.2500
 
     insta::assert_snapshot!("deposits_and_withdrawals", run_and_normalise(input));
 }
+
+#[test]
+fn deposit_dispute_chargeback_should_lock_account_in_snapshot() {
+    // Client 1: deposits 10, disputes that deposit, chargeback reverses it.
+    // Held returns to 0, available stays 0, total drops to 0, account locked.
+    let input = "\
+type,client,tx,amount
+deposit,1,1,10.0000
+dispute,1,1,
+chargeback,1,1,
+";
+
+    insta::assert_snapshot!("deposit_dispute_chargeback", run_and_normalise(input));
+}
+
+#[test]
+fn fraud_sequence_should_drive_balance_negative_in_snapshot() {
+    // Per Q3, a deposit that gets withdrawn before being charged back drives
+    // total below zero, modelling the platform's exposure post-fraud.
+    let input = "\
+type,client,tx,amount
+deposit,1,1,100.0000
+withdrawal,1,2,80.0000
+dispute,1,1,
+chargeback,1,1,
+";
+
+    insta::assert_snapshot!("fraud_sequence_negative_balance", run_and_normalise(input));
+}
+
+#[test]
+fn prior_dispute_resolve_should_still_succeed_after_lock_in_snapshot() {
+    // Per Q2, a resolve on a tx already in `Disputed` state is allowed even
+    // after a different dispute's chargeback locked the account. Client 1
+    // has tx 1 (charged back, locks account) and tx 2 (disputed before lock,
+    // resolved after).
+    let input = "\
+type,client,tx,amount
+deposit,1,1,10.0000
+deposit,1,2,5.0000
+dispute,1,1,
+dispute,1,2,
+chargeback,1,1,
+resolve,1,2,
+";
+
+    insta::assert_snapshot!("prior_dispute_resolve_after_lock", run_and_normalise(input));
+}

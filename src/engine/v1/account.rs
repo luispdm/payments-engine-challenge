@@ -97,6 +97,18 @@ impl Account {
         self.held -= amount;
         self.available += amount;
     }
+
+    /// Reverse a held deposit and lock the account.
+    ///
+    /// Drops `amount` from `held` without crediting `available`, so `total`
+    /// (derived) decreases by `amount`. Per Q3 nothing is clamped: if a
+    /// withdrawal had already drained the deposited funds, `available` is
+    /// already negative and stays negative, correctly modelling post-fraud
+    /// exposure.
+    pub fn apply_chargeback(&mut self, amount: Decimal) {
+        self.held -= amount;
+        self.locked = true;
+    }
 }
 
 /// Returned by [`Account::apply_withdrawal`] when the requested debit would
@@ -282,5 +294,73 @@ mod tests {
         acct.apply_release("3.0000".parse().unwrap());
 
         assert_eq!(acct.total(), total_before);
+    }
+
+    #[test]
+    fn apply_chargeback_should_drop_held_without_crediting_available() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("10.0000".parse().unwrap());
+        acct.apply_hold("3.0000".parse().unwrap());
+
+        acct.apply_chargeback("3.0000".parse().unwrap());
+
+        assert_eq!(
+            acct,
+            Account {
+                client: 1,
+                available: "7.0000".parse().unwrap(),
+                held: Decimal::ZERO,
+                locked: true,
+            },
+        );
+    }
+
+    #[test]
+    fn apply_chargeback_should_lock_account() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("10.0000".parse().unwrap());
+        acct.apply_hold("10.0000".parse().unwrap());
+
+        acct.apply_chargeback("10.0000".parse().unwrap());
+
+        assert!(acct.locked());
+    }
+
+    #[test]
+    fn apply_chargeback_should_drop_total_by_amount() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("10.0000".parse().unwrap());
+        acct.apply_hold("3.0000".parse().unwrap());
+        let total_before = acct.total();
+
+        acct.apply_chargeback("3.0000".parse().unwrap());
+
+        assert_eq!(
+            acct.total(),
+            total_before - "3.0000".parse::<Decimal>().unwrap()
+        );
+    }
+
+    #[test]
+    fn apply_chargeback_should_drive_total_negative_for_fraud_sequence() {
+        // Fraud sequence per Q3: deposit then withdraw, then chargeback
+        // reverses the original credit. `available` was already drained so
+        // the chargeback drops it past zero.
+        let mut acct = Account::new(1);
+        acct.apply_deposit("100.0000".parse().unwrap());
+        acct.apply_withdrawal("80.0000".parse().unwrap()).unwrap();
+        acct.apply_hold("100.0000".parse().unwrap());
+
+        acct.apply_chargeback("100.0000".parse().unwrap());
+
+        assert_eq!(
+            acct,
+            Account {
+                client: 1,
+                available: "-80.0000".parse().unwrap(),
+                held: Decimal::ZERO,
+                locked: true,
+            },
+        );
     }
 }
