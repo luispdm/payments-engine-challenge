@@ -69,74 +69,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_should_set_client_id() {
-        let acct = Account::new(7);
-
-        assert_eq!(acct.client(), 7);
+    fn new_should_zero_all_balances_for_given_client() {
+        assert_eq!(
+            Account::new(7),
+            Account {
+                client: 7,
+                available: Decimal::ZERO,
+                held: Decimal::ZERO,
+                locked: false,
+            },
+        );
     }
 
     #[test]
-    fn new_should_zero_available() {
-        let acct = Account::new(1);
-
-        assert_eq!(acct.available(), Decimal::ZERO);
-    }
-
-    #[test]
-    fn new_should_zero_held() {
-        let acct = Account::new(1);
-
-        assert_eq!(acct.held(), Decimal::ZERO);
-    }
-
-    #[test]
-    fn new_should_zero_total() {
-        let acct = Account::new(1);
-
-        assert_eq!(acct.total(), Decimal::ZERO);
-    }
-
-    #[test]
-    fn new_should_be_unlocked() {
-        let acct = Account::new(1);
-
-        assert!(!acct.locked());
-    }
-
-    #[test]
-    fn apply_deposit_should_credit_available() {
+    fn apply_deposit_should_credit_available_and_leave_held() {
         let mut acct = Account::new(1);
-        let amount: Decimal = "10.1234".parse().unwrap();
+        acct.apply_deposit("10.1234".parse().unwrap());
 
-        acct.apply_deposit(amount);
-
-        assert_eq!(acct.available(), amount);
-    }
-
-    #[test]
-    fn apply_deposit_should_increase_total_by_amount() {
-        let mut acct = Account::new(1);
-        let amount: Decimal = "10.1234".parse().unwrap();
-
-        acct.apply_deposit(amount);
-
-        assert_eq!(acct.total(), amount);
-    }
-
-    #[test]
-    fn apply_deposit_should_leave_held_unchanged() {
-        let mut acct = Account::new(1);
-
-        acct.apply_deposit("5.0000".parse().unwrap());
-
-        assert_eq!(acct.held(), Decimal::ZERO);
-    }
-
-    #[test]
-    fn total_should_equal_available_plus_held() {
-        let acct = Account::new(1);
-
-        assert_eq!(acct.total(), acct.available() + acct.held());
+        assert_eq!(
+            acct,
+            Account {
+                client: 1,
+                available: "10.1234".parse().unwrap(),
+                held: Decimal::ZERO,
+                locked: false,
+            },
+        );
     }
 
     #[test]

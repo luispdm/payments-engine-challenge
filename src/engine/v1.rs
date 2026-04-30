@@ -66,43 +66,20 @@ mod tests {
 
     use super::*;
 
-    fn process_one_deposit(client: u16, tx: u32, amount: &str) -> Engine {
+    #[test]
+    fn process_should_apply_deposit_to_target_client_account() {
         let mut engine = Engine::new();
         engine
             .process(Transaction::Deposit {
-                client,
-                tx,
-                amount: amount.parse().unwrap(),
+                client: 1,
+                tx: 1,
+                amount: "12.3456".parse().unwrap(),
             })
             .unwrap();
-        engine
-    }
 
-    #[test]
-    fn process_should_credit_available_when_deposit() {
-        let engine = process_one_deposit(1, 1, "12.3456");
-
-        assert_eq!(
-            engine.accounts.get(&1).unwrap().available(),
-            "12.3456".parse::<Decimal>().unwrap(),
-        );
-    }
-
-    #[test]
-    fn process_should_increase_total_by_amount_when_deposit() {
-        let engine = process_one_deposit(1, 1, "12.3456");
-
-        assert_eq!(
-            engine.accounts.get(&1).unwrap().total(),
-            "12.3456".parse::<Decimal>().unwrap(),
-        );
-    }
-
-    #[test]
-    fn process_should_leave_held_unchanged_when_deposit() {
-        let engine = process_one_deposit(1, 1, "12.3456");
-
-        assert_eq!(engine.accounts.get(&1).unwrap().held(), Decimal::ZERO);
+        let mut expected = Account::new(1);
+        expected.apply_deposit("12.3456".parse().unwrap());
+        assert_eq!(engine.accounts.get(&1), Some(&expected));
     }
 
     #[test]
