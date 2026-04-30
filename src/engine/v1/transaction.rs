@@ -15,7 +15,7 @@ use super::error::EngineError;
 /// Withdrawal, dispute, resolve and chargeback variants are recognised at
 /// task 01 so the parser never crashes on a well-formed CSV; the engine
 /// only acts on `Deposit` until later tasks wire up the rest.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Transaction {
     /// Credit `amount` to client's `available` and `total`.
     Deposit {

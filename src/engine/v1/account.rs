@@ -13,7 +13,7 @@ use rust_decimal::Decimal;
 /// Fields are private; readers go through accessor methods. This keeps every
 /// mutation in one place and avoids callers desyncing the `total` view from
 /// `available + held`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Account {
     client: u16,
     available: Decimal,
