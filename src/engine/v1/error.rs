@@ -84,4 +84,25 @@ pub enum EngineError {
         /// Referenced tx id.
         tx: u32,
     },
+
+    /// Dispute event fired against a tx in the terminal `ChargedBack` state.
+    /// Per Q5 a charged-back tx accepts no further dispute lifecycle events.
+    #[error("transaction {tx} for client {client}: tx already charged back")]
+    ChargedBack {
+        /// Client id from the offending row.
+        client: u16,
+        /// Referenced tx id.
+        tx: u32,
+    },
+
+    /// Deposit, withdrawal, or new dispute targeted an account locked by a
+    /// previous chargeback. Per Q2 only resolves and chargebacks on disputes
+    /// opened before the lock continue to process.
+    #[error("transaction {tx} for client {client}: account is locked")]
+    AccountLocked {
+        /// Client id from the offending row.
+        client: u16,
+        /// Referenced tx id.
+        tx: u32,
+    },
 }
