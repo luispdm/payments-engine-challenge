@@ -78,6 +78,15 @@ impl Account {
         self.available -= amount;
         Ok(())
     }
+
+    /// Move `amount` from `available` to `held`. `total` (derived) is
+    /// unchanged. Per Q3 a hold may drive `available` negative; that
+    /// correctly models post-fraud exposure and preserves the
+    /// `total = available + held` invariant.
+    pub fn apply_hold(&mut self, amount: Decimal) {
+        self.available -= amount;
+        self.held += amount;
+    }
 }
 
 /// Returned by [`Account::apply_withdrawal`] when the requested debit would
@@ -189,5 +198,48 @@ mod tests {
         acct.apply_withdrawal("2.5000".parse().unwrap()).unwrap();
 
         assert_eq!(acct.available(), Decimal::ZERO);
+    }
+
+    #[test]
+    fn apply_hold_should_move_amount_from_available_to_held() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("10.0000".parse().unwrap());
+
+        acct.apply_hold("3.0000".parse().unwrap());
+
+        assert_eq!(
+            acct,
+            Account {
+                client: 1,
+                available: "7.0000".parse().unwrap(),
+                held: "3.0000".parse().unwrap(),
+                locked: false,
+            },
+        );
+    }
+
+    #[test]
+    fn apply_hold_should_leave_total_unchanged() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("10.0000".parse().unwrap());
+        let total_before = acct.total();
+
+        acct.apply_hold("3.0000".parse().unwrap());
+
+        assert_eq!(acct.total(), total_before);
+    }
+
+    #[test]
+    fn apply_hold_should_drive_available_negative_when_amount_exceeds_balance() {
+        // Per Q3, holds may take `available` below zero so the
+        // `total = available + held` invariant survives post-fraud states.
+        let mut acct = Account::new(1);
+        acct.apply_deposit("1.0000".parse().unwrap());
+
+        acct.apply_hold("5.0000".parse().unwrap());
+
+        assert_eq!(acct.available(), "-4.0000".parse::<Decimal>().unwrap());
+        assert_eq!(acct.held(), "5.0000".parse::<Decimal>().unwrap());
+        assert_eq!(acct.total(), "1.0000".parse::<Decimal>().unwrap());
     }
 }

@@ -34,4 +34,44 @@ pub enum EngineError {
         /// Amount the client tried to withdraw.
         amount: Decimal,
     },
+
+    /// Dispute / resolve / chargeback referenced a tx that the engine has
+    /// never seen.
+    #[error("transaction {tx} for client {client}: not found in tx ledger")]
+    TxNotFound {
+        /// Client id from the offending row.
+        client: u16,
+        /// Referenced tx id.
+        tx: u32,
+    },
+
+    /// Dispute event references a withdrawal; per Q1 only deposits are
+    /// disputable. Unreachable until task 06 stores withdrawal markers.
+    #[error("transaction {tx} for client {client}: withdrawals are not disputable")]
+    WithdrawalDispute {
+        /// Client id from the offending row.
+        client: u16,
+        /// Referenced tx id.
+        tx: u32,
+    },
+
+    /// Dispute event fired against a tx that is already in `Disputed`
+    /// state. Per Q5 this is a no-op (idempotent).
+    #[error("transaction {tx} for client {client}: already disputed")]
+    AlreadyDisputed {
+        /// Client id from the offending row.
+        client: u16,
+        /// Referenced tx id.
+        tx: u32,
+    },
+
+    /// Dispute event references a tx whose stored client_id differs from
+    /// the row's client_id. Treated as a partner error.
+    #[error("transaction {tx}: client {client} does not match the recorded client")]
+    ClientMismatch {
+        /// Client id from the offending row.
+        client: u16,
+        /// Referenced tx id.
+        tx: u32,
+    },
 }
