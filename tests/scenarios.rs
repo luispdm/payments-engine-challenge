@@ -63,6 +63,20 @@ deposit,1,3,2.0000
 }
 
 #[test]
+fn deposit_then_dispute_should_hold_funds_in_snapshot() {
+    // Client 1: deposits 10, then disputes that deposit. Funds move from
+    // available to held; total stays at 10. Client 2: undisputed deposit.
+    let input = "\
+type,client,tx,amount
+deposit,1,1,10.0000
+deposit,2,2,5.0000
+dispute,1,1,
+";
+
+    insta::assert_snapshot!("deposit_then_dispute", run_and_normalise(input));
+}
+
+#[test]
 fn deposits_and_withdrawals_should_settle_to_expected_balances() {
     // Client 1: 10 deposited, 3.5 withdrawn, ends at 6.5.
     // Client 2: 4 deposited, attempted 9 withdrawal rejected (insufficient

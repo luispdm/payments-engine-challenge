@@ -1,25 +1,32 @@
 //! Baseline engine implementation.
 //!
-//! Per-client account state lives in [`Engine`]; transaction parsing,
-//! errors and CSV glue live in submodules. Subsequent tasks add the
-//! transaction ledger, dispute lifecycle and lock semantics.
+//! Per-client account state lives in [`Engine`] alongside a tx ledger that
+//! powers dispute lookups. Transaction parsing, errors and CSV glue live in
+//! submodules. Subsequent tasks add resolve / chargeback transitions and
+//! lock semantics.
 
 use std::collections::HashMap;
 
 pub mod account;
 pub mod error;
 pub(crate) mod io;
+pub mod ledger;
 pub mod transaction;
 
 use account::Account;
 use error::EngineError;
+use ledger::{DepositRecord, TxRecord};
 use transaction::Transaction;
 
-/// In-memory payments engine. State is the per-client account map; later
-/// tasks add a global tx ledger for dedup and dispute lookups.
+/// In-memory payments engine.
+///
+/// Holds a per-client account map and a per-tx ledger keyed by tx id. The
+/// ledger is the sole source of truth for both dispute lookup and (from
+/// task 06) cross-type tx-id dedup.
 #[derive(Debug, Default)]
 pub struct Engine {
     accounts: HashMap<u16, Account>,
+    txs: HashMap<u32, TxRecord>,
 }
 
 impl Engine {
@@ -30,22 +37,36 @@ impl Engine {
 
     /// Apply `tx` to the engine state.
     ///
-    /// Tasks 01-02 act on [`Transaction::Deposit`] and
-    /// [`Transaction::Withdrawal`]; the dispute lifecycle variants parse
-    /// cleanly but no-op until later tasks wire them up.
+    /// Tasks 01-03 act on [`Transaction::Deposit`], [`Transaction::Withdrawal`]
+    /// and [`Transaction::Dispute`]; resolve and chargeback parse cleanly but
+    /// no-op until later tasks wire them up.
     ///
     /// # Errors
     ///
     /// - [`EngineError::InsufficientFunds`] when a withdrawal would drive
-    ///   `available` below zero. Per spec the driver swallows this; the
-    ///   variant is surfaced so logging can attach later.
+    ///   `available` below zero.
+    /// - [`EngineError::TxNotFound`] when a dispute references an unknown
+    ///   tx id.
+    /// - [`EngineError::WithdrawalDispute`] when a dispute references a
+    ///   withdrawal (unreachable until task 06 stores withdrawal markers).
+    /// - [`EngineError::AlreadyDisputed`] when a dispute fires against a tx
+    ///   already in `Disputed` state (idempotent re-dispute, per Q5).
+    /// - [`EngineError::ClientMismatch`] when a dispute's client_id does not
+    ///   match the recorded deposit's client.
+    ///
+    /// Per spec the driver swallows all of the above; variants are returned
+    /// so logging can attach in task 06.
     pub fn process(&mut self, tx: Transaction) -> Result<(), EngineError> {
         match tx {
-            Transaction::Deposit { client, amount, .. } => {
+            Transaction::Deposit { client, tx, amount } => {
                 self.accounts
                     .entry(client)
                     .or_insert_with(|| Account::new(client))
                     .apply_deposit(amount);
+                // Task 06 will add duplicate-tx-id detection here; for now
+                // valid input guarantees uniqueness.
+                self.txs
+                    .insert(tx, TxRecord::Deposit(DepositRecord::new(client, amount)));
                 Ok(())
             }
             Transaction::Withdrawal { client, tx, amount } => self
@@ -54,9 +75,33 @@ impl Engine {
                 .or_insert_with(|| Account::new(client))
                 .apply_withdrawal(amount)
                 .map_err(|_| EngineError::InsufficientFunds { client, tx, amount }),
-            Transaction::Dispute { .. }
-            | Transaction::Resolve { .. }
-            | Transaction::Chargeback { .. } => Ok(()),
+            Transaction::Dispute { client, tx } => self.apply_dispute(client, tx),
+            Transaction::Resolve { .. } | Transaction::Chargeback { .. } => Ok(()),
+        }
+    }
+
+    fn apply_dispute(&mut self, client: u16, tx: u32) -> Result<(), EngineError> {
+        let Some(record) = self.txs.get_mut(&tx) else {
+            return Err(EngineError::TxNotFound { client, tx });
+        };
+        match record {
+            TxRecord::Deposit(deposit) => {
+                if deposit.client() != client {
+                    return Err(EngineError::ClientMismatch { client, tx });
+                }
+                let amount = deposit
+                    .try_dispute()
+                    .map_err(|_| EngineError::AlreadyDisputed { client, tx })?;
+                // Per Q3 a hold may drive `available` negative, so a hold on
+                // a freshly-created zero account is well-defined; using
+                // `entry` keeps the engine sound even if a future change
+                // breaks the deposit-creates-account invariant.
+                self.accounts
+                    .entry(client)
+                    .or_insert_with(|| Account::new(client))
+                    .apply_hold(amount);
+                Ok(())
+            }
         }
     }
 
@@ -71,6 +116,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     use super::*;
+    use ledger::DisputeState;
 
     #[test]
     fn process_should_apply_deposit_to_target_client_account() {
@@ -261,13 +307,161 @@ mod tests {
     }
 
     #[test]
-    fn process_should_noop_when_dispute() {
+    fn process_should_hold_funds_when_dispute_targets_existing_deposit() {
         let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
 
         engine
             .process(Transaction::Dispute { client: 1, tx: 1 })
             .unwrap();
 
-        assert!(engine.accounts.is_empty());
+        let acct = engine.accounts.get(&1).unwrap();
+        assert_eq!(acct.available(), Decimal::ZERO);
+        assert_eq!(acct.held(), "10.0000".parse::<Decimal>().unwrap());
+        assert_eq!(acct.total(), "10.0000".parse::<Decimal>().unwrap());
     }
+
+    #[test]
+    fn process_should_transition_state_to_disputed_when_dispute_succeeds() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        engine
+            .process(Transaction::Dispute { client: 1, tx: 1 })
+            .unwrap();
+
+        let TxRecord::Deposit(record) = engine.txs.get(&1).unwrap();
+        assert_eq!(record.state(), DisputeState::Disputed);
+    }
+
+    #[test]
+    fn process_should_return_tx_not_found_when_dispute_targets_unknown_tx() {
+        let mut engine = Engine::new();
+
+        let err = engine
+            .process(Transaction::Dispute { client: 1, tx: 99 })
+            .unwrap_err();
+
+        assert!(matches!(err, EngineError::TxNotFound { client: 1, tx: 99 }));
+    }
+
+    #[test]
+    fn process_should_leave_balances_unchanged_when_dispute_targets_unknown_tx() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "5.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        engine
+            .process(Transaction::Dispute { client: 1, tx: 99 })
+            .unwrap_err();
+
+        let acct = engine.accounts.get(&1).unwrap();
+        assert_eq!(acct.available(), "5.0000".parse::<Decimal>().unwrap());
+        assert_eq!(acct.held(), Decimal::ZERO);
+    }
+
+    #[test]
+    fn process_should_return_already_disputed_when_dispute_fires_twice() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+        engine
+            .process(Transaction::Dispute { client: 1, tx: 1 })
+            .unwrap();
+
+        let err = engine
+            .process(Transaction::Dispute { client: 1, tx: 1 })
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::AlreadyDisputed { client: 1, tx: 1 }
+        ));
+    }
+
+    #[test]
+    fn process_should_leave_balances_unchanged_when_dispute_repeats() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+        engine
+            .process(Transaction::Dispute { client: 1, tx: 1 })
+            .unwrap();
+
+        let _ = engine.process(Transaction::Dispute { client: 1, tx: 1 });
+
+        let acct = engine.accounts.get(&1).unwrap();
+        assert_eq!(acct.available(), Decimal::ZERO);
+        assert_eq!(acct.held(), "10.0000".parse::<Decimal>().unwrap());
+    }
+
+    #[test]
+    fn process_should_return_client_mismatch_when_dispute_client_differs_from_deposit() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        let err = engine
+            .process(Transaction::Dispute { client: 2, tx: 1 })
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::ClientMismatch { client: 2, tx: 1 }
+        ));
+    }
+
+    #[test]
+    fn process_should_leave_balances_unchanged_when_dispute_client_mismatches() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        let _ = engine.process(Transaction::Dispute { client: 2, tx: 1 });
+
+        let acct = engine.accounts.get(&1).unwrap();
+        assert_eq!(acct.available(), "10.0000".parse::<Decimal>().unwrap());
+        assert_eq!(acct.held(), Decimal::ZERO);
+    }
+
+    // TODO(task 06): once `TxRecord::Withdrawal` lands, add a test for
+    // dispute-on-withdrawal returning `EngineError::WithdrawalDispute`.
+    // Variant exists already so the engine API is stable.
 }
