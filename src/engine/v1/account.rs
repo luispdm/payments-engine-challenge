@@ -167,7 +167,8 @@ mod tests {
         let mut acct = Account::new(1);
         acct.apply_deposit("1.0000".parse().unwrap());
 
-        let _ = acct.apply_withdrawal("1.0001".parse().unwrap());
+        acct.apply_withdrawal("1.0001".parse().unwrap())
+            .unwrap_err();
 
         assert_eq!(
             acct,

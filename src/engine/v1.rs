@@ -193,11 +193,13 @@ mod tests {
             })
             .unwrap();
 
-        let _ = engine.process(Transaction::Withdrawal {
-            client: 1,
-            tx: 2,
-            amount: "5.0000".parse().unwrap(),
-        });
+        engine
+            .process(Transaction::Withdrawal {
+                client: 1,
+                tx: 2,
+                amount: "5.0000".parse().unwrap(),
+            })
+            .unwrap_err();
 
         assert_eq!(
             engine.accounts.get(&1).unwrap().available(),
