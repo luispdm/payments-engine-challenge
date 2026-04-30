@@ -76,11 +76,11 @@ If the input is ambiguous, grill the user before doing anything.
 
 1. **Fetch PR state.**
    ```
-   gh pr view <N> --json headRefName,headRepository,baseRefName,reviewDecision
+   gh pr view <N> --json headRefName,headRepository,baseRefName
    gh api repos/<owner>/<repo>/pulls/<N>/comments         # review comments (inline on diff)
    gh api repos/<owner>/<repo>/issues/<N>/comments        # issue comments (PR-level)
    ```
-   Distinguish addressed vs unaddressed comments (look for existing replies in the same thread).
+   Distinguish addressed vs unaddressed comments (look for existing replies in the same thread). Do not fetch `reviewDecision` — the reviewer agent always submits `event=COMMENT` (GitHub blocks self-`APPROVE` / self-`REQUEST_CHANGES`), so this field is permanently uninformative; the logical verdict lives in the review body's `**Verdict:** ...` first line.
 
 2. **Check out the PR branch.**
    ```
