@@ -47,12 +47,12 @@ tx/sec on the 1M-tx workload; RSS is peak `ru_maxrss` from
 
 | Variant | Storage | 1M-tx mean ± stddev (ms) | Throughput (Mtx/s) | 10M-tx peak RSS (MiB) |
 |---------|---------|--------------------------|--------------------|-----------------------|
-| v1      | single `HashMap<u32, TxRecord>` | 100.75 ± 5.28 | 9.93 | 381.5 |
-| v2      | `HashMap<u32, DepositRecord>` + `HashSet<u32>` | 84.34 ± 6.84 | 11.86 | 326.2 |
+| v1      | single `HashMap<u32, TxRecord>` | 105.65 ± 7.07 | 9.47 | 381.5 |
+| v2      | `HashMap<u32, DepositRecord>` + `HashSet<u32>` | 82.46 ± 5.70 | 12.13 | 326.2 |
 
 ### Findings
 
-- **v2 wins on both axes.** ~17% faster on throughput and ~14% smaller
+- **v2 wins on both axes.** ~22% faster on throughput and ~14% smaller
   peak RSS at 10M tx. The dedup-only `HashSet<u32>` carries 4-byte keys
   vs v1's enum-typed `TxRecord` slot (24 bytes due to the
   `DepositRecord` payload), so withdrawals — 30% of the stream —

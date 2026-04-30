@@ -8,7 +8,7 @@
 //! the [`Transaction`] type so v2 can consume the same `Vec<Transaction>`
 //! without introducing a back-edge to `bench_support`.
 
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use rust_decimal::Decimal;
 
 use crate::engine::v1::transaction::Transaction;
