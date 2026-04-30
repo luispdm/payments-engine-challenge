@@ -207,6 +207,24 @@ deposit,1,3,1.0000
 }
 
 #[test]
+fn non_positive_amounts_should_be_rejected_without_consuming_tx_ids_in_snapshot() {
+    // Negative deposits and withdrawals are partner errors: a negative
+    // deposit drives `available` negative without a chargeback, a negative
+    // withdrawal credits the account by debiting a negative. Both rejected
+    // up-front without consuming the tx id, so a corrected retry on the
+    // same id (here tx 2 redeposited as +4) still applies.
+    let input = "\
+type,client,tx,amount
+deposit,1,1,10.0000
+deposit,1,2,-5.0000
+withdrawal,1,3,-3.0000
+deposit,1,2,4.0000
+";
+
+    insta::assert_snapshot!("non_positive_amounts_rejected", run_and_normalise(input));
+}
+
+#[test]
 fn prior_dispute_resolve_should_still_succeed_after_lock_in_snapshot() {
     // Per Q2, a resolve on a tx already in `Disputed` state is allowed even
     // after a different dispute's chargeback locked the account. Client 1

@@ -1108,6 +1108,158 @@ fn process_should_leave_balances_unchanged_when_deposit_reuses_existing_withdraw
 }
 
 #[test]
+fn process_should_return_non_positive_amount_when_deposit_amount_is_negative() {
+    let mut engine = Engine::new();
+
+    let err = engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "-5.0000".parse().unwrap(),
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        EngineError::NonPositiveAmount { client: 1, tx: 1, .. }
+    ));
+}
+
+#[test]
+fn process_should_return_non_positive_amount_when_deposit_amount_is_zero() {
+    let mut engine = Engine::new();
+
+    let err = engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: Decimal::ZERO,
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        EngineError::NonPositiveAmount { client: 1, tx: 1, .. }
+    ));
+}
+
+#[test]
+fn process_should_leave_state_untouched_when_deposit_amount_non_positive() {
+    let mut engine = Engine::new();
+
+    let _ = engine.process(Transaction::Deposit {
+        client: 1,
+        tx: 1,
+        amount: "-5.0000".parse().unwrap(),
+    });
+
+    // No account materialised, no tx id consumed: the row was malformed,
+    // not a recordable attempt.
+    assert!(!engine.accounts.contains_key(&1));
+    assert!(!engine.txs.contains_key(&1));
+}
+
+#[test]
+fn process_should_accept_subsequent_deposit_reusing_id_after_non_positive_rejection() {
+    let mut engine = Engine::new();
+
+    let _ = engine.process(Transaction::Deposit {
+        client: 1,
+        tx: 1,
+        amount: "-5.0000".parse().unwrap(),
+    });
+    engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "10.0000".parse().unwrap(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        engine.accounts.get(&1).unwrap().available(),
+        "10.0000".parse::<Decimal>().unwrap()
+    );
+}
+
+#[test]
+fn process_should_return_non_positive_amount_when_withdrawal_amount_is_negative() {
+    let mut engine = Engine::new();
+    engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "10.0000".parse().unwrap(),
+        })
+        .unwrap();
+
+    let err = engine
+        .process(Transaction::Withdrawal {
+            client: 1,
+            tx: 2,
+            amount: "-3.0000".parse().unwrap(),
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        EngineError::NonPositiveAmount { client: 1, tx: 2, .. }
+    ));
+}
+
+#[test]
+fn process_should_return_non_positive_amount_when_withdrawal_amount_is_zero() {
+    let mut engine = Engine::new();
+    engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "10.0000".parse().unwrap(),
+        })
+        .unwrap();
+
+    let err = engine
+        .process(Transaction::Withdrawal {
+            client: 1,
+            tx: 2,
+            amount: Decimal::ZERO,
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        EngineError::NonPositiveAmount { client: 1, tx: 2, .. }
+    ));
+}
+
+#[test]
+fn process_should_leave_balances_unchanged_when_withdrawal_amount_negative() {
+    // Without the up-front guard, `apply_withdrawal` would subtract a
+    // negative and effectively credit the account, bypassing the dispute
+    // machinery entirely.
+    let mut engine = Engine::new();
+    engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "10.0000".parse().unwrap(),
+        })
+        .unwrap();
+
+    let _ = engine.process(Transaction::Withdrawal {
+        client: 1,
+        tx: 2,
+        amount: "-3.0000".parse().unwrap(),
+    });
+
+    assert_eq!(
+        engine.accounts.get(&1).unwrap().available(),
+        "10.0000".parse::<Decimal>().unwrap()
+    );
+    assert!(!engine.txs.contains_key(&2));
+}
+
+#[test]
 fn process_should_record_withdrawal_tx_id_even_when_insufficient_funds_rejects() {
     // Per 6a tx ids are globally unique; a withdrawal that fails for
     // insufficient funds still consumes its tx id so a partner-error

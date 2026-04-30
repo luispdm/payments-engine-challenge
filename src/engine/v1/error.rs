@@ -35,6 +35,22 @@ pub enum EngineError {
         amount: Decimal,
     },
 
+    /// Deposit or withdrawal row carries a non-positive amount (`<= 0`).
+    /// A negative deposit drives `available` negative without going through
+    /// the dispute machinery; a negative withdrawal flips its sign and
+    /// credits the account out of thin air. Both are structurally
+    /// nonsensical and rejected before the tx id is recorded, so the id
+    /// stays free for a corrected retry.
+    #[error("transaction {tx} for client {client}: amount {amount} must be strictly positive")]
+    NonPositiveAmount {
+        /// Client id.
+        client: u16,
+        /// Tx id of the rejected row.
+        tx: u32,
+        /// Offending amount.
+        amount: Decimal,
+    },
+
     /// Dispute / resolve / chargeback referenced a tx that the engine has
     /// never seen.
     #[error("transaction {tx} for client {client}: not found in tx ledger")]

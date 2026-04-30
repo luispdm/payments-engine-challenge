@@ -8,6 +8,8 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
+use rust_decimal::Decimal;
+
 pub mod account;
 pub mod error;
 pub(crate) mod io;
@@ -48,6 +50,9 @@ impl Engine {
     ///
     /// # Errors
     ///
+    /// - [`EngineError::NonPositiveAmount`] when a deposit or withdrawal
+    ///   carries an amount `<= 0`. Tx id is *not* consumed: the row is
+    ///   structurally malformed rather than a recordable attempt.
     /// - [`EngineError::InsufficientFunds`] when a withdrawal would drive
     ///   `available` below zero.
     /// - [`EngineError::DuplicateTxId`] when a deposit or withdrawal reuses
@@ -74,6 +79,9 @@ impl Engine {
     pub fn process(&mut self, tx: Transaction) -> Result<(), EngineError> {
         match tx {
             Transaction::Deposit { client, tx, amount } => {
+                if amount <= Decimal::ZERO {
+                    return Err(EngineError::NonPositiveAmount { client, tx, amount });
+                }
                 if Self::account_locked(&self.accounts, client) {
                     return Err(EngineError::AccountLocked { client, tx });
                 }
@@ -91,6 +99,9 @@ impl Engine {
                 Ok(())
             }
             Transaction::Withdrawal { client, tx, amount } => {
+                if amount <= Decimal::ZERO {
+                    return Err(EngineError::NonPositiveAmount { client, tx, amount });
+                }
                 if Self::account_locked(&self.accounts, client) {
                     return Err(EngineError::AccountLocked { client, tx });
                 }
