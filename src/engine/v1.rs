@@ -80,11 +80,11 @@ impl Engine {
                 let Entry::Vacant(slot) = self.txs.entry(tx) else {
                     return Err(EngineError::DuplicateTxId { client, tx });
                 };
+                slot.insert(TxRecord::Deposit(DepositRecord::new(client, amount)));
                 self.accounts
                     .entry(client)
                     .or_insert_with(|| Account::new(client))
                     .apply_deposit(amount);
-                slot.insert(TxRecord::Deposit(DepositRecord::new(client, amount)));
                 Ok(())
             }
             Transaction::Withdrawal { client, tx, amount } => {
