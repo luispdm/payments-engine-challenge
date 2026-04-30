@@ -1121,7 +1121,11 @@ fn process_should_return_non_positive_amount_when_deposit_amount_is_negative() {
 
     assert!(matches!(
         err,
-        EngineError::NonPositiveAmount { client: 1, tx: 1, .. }
+        EngineError::NonPositiveAmount {
+            client: 1,
+            tx: 1,
+            ..
+        }
     ));
 }
 
@@ -1139,7 +1143,11 @@ fn process_should_return_non_positive_amount_when_deposit_amount_is_zero() {
 
     assert!(matches!(
         err,
-        EngineError::NonPositiveAmount { client: 1, tx: 1, .. }
+        EngineError::NonPositiveAmount {
+            client: 1,
+            tx: 1,
+            ..
+        }
     ));
 }
 
@@ -1203,7 +1211,11 @@ fn process_should_return_non_positive_amount_when_withdrawal_amount_is_negative(
 
     assert!(matches!(
         err,
-        EngineError::NonPositiveAmount { client: 1, tx: 2, .. }
+        EngineError::NonPositiveAmount {
+            client: 1,
+            tx: 2,
+            ..
+        }
     ));
 }
 
@@ -1228,7 +1240,11 @@ fn process_should_return_non_positive_amount_when_withdrawal_amount_is_zero() {
 
     assert!(matches!(
         err,
-        EngineError::NonPositiveAmount { client: 1, tx: 2, .. }
+        EngineError::NonPositiveAmount {
+            client: 1,
+            tx: 2,
+            ..
+        }
     ));
 }
 
