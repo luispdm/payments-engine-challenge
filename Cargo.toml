@@ -5,3 +5,10 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1"
+csv = "1"
+rust_decimal = { version = "1", features = ["serde-str"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+insta = "1"
