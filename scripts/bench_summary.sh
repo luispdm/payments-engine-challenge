@@ -33,8 +33,8 @@ if [[ $SKIP_BENCH -eq 0 ]]; then
 fi
 
 ESTIMATES_DIR="target/criterion/throughput_1m"
-V1_JSON="$ESTIMATES_DIR/v1_option_b/new/estimates.json"
-V2_JSON="$ESTIMATES_DIR/v2_option_a/new/estimates.json"
+V1_JSON="$ESTIMATES_DIR/v1/new/estimates.json"
+V2_JSON="$ESTIMATES_DIR/v2/new/estimates.json"
 
 if [[ ! -f "$V1_JSON" || ! -f "$V2_JSON" ]]; then
     echo "error: criterion estimates not found; run without --skip-bench first" >&2
@@ -81,6 +81,6 @@ V2_MIB=$(fmt_mib "$V2_RSS_KB")
 cat <<TABLE
 | Variant | Storage | 1M-tx mean ± stddev (ms) | Throughput (Mtx/s) | 10M-tx peak RSS (MiB) |
 |---------|---------|--------------------------|--------------------|-----------------------|
-| v1      | option B (single \`HashMap<u32, TxRecord>\`) | $V1_TIME_MS ± $V1_TIME_STDDEV_MS | $V1_THRU | $V1_MIB |
-| v2      | option A (\`HashMap<u32, DepositRecord>\` + \`HashSet<u32>\`) | $V2_TIME_MS ± $V2_TIME_STDDEV_MS | $V2_THRU | $V2_MIB |
+| v1      | single \`HashMap<u32, TxRecord>\` | $V1_TIME_MS ± $V1_TIME_STDDEV_MS | $V1_THRU | $V1_MIB |
+| v2      | \`HashMap<u32, DepositRecord>\` + \`HashSet<u32>\` | $V2_TIME_MS ± $V2_TIME_STDDEV_MS | $V2_THRU | $V2_MIB |
 TABLE

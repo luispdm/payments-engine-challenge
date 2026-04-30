@@ -1,4 +1,4 @@
-//! One-shot memory measurement binary for engine v2 (option A).
+//! One-shot memory measurement binary for engine v2.
 //!
 //! Mirror of `mem_v1` so `scripts/bench_summary.sh` can compare peak RSS
 //! between the two storage layouts under identical input.

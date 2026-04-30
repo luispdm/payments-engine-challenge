@@ -1,9 +1,9 @@
 //! Unit tests for v2's [`super::Engine::process`].
 //!
-//! v2 differs from v1 only in storage layout (option A: separate map+set).
-//! These tests cover the same behaviors as v1's suite but go through the
-//! public API (`accounts()` iterator + error variants) since v2's private
-//! fields differ from v1's. The cross-check integration test in
+//! v2 differs from v1 only in storage layout (separate map + set). These
+//! tests cover the same behaviors as v1's suite but go through the public
+//! API (`accounts()` iterator + error variants) since v2's private fields
+//! differ from v1's. The cross-check integration test in
 //! `tests/scenarios.rs` complements this suite by asserting v2 matches v1
 //! byte-for-byte over the existing CSV scenarios.
 

@@ -1,5 +1,6 @@
-//! Single-threaded throughput bench for engine v1 (option B) vs engine v2
-//! (option A). See task 07a in `~/payments-engine-challenge-docs/`.
+//! Single-threaded throughput bench for engine v1 vs engine v2. See task
+//! 07a in `~/payments-engine-challenge-docs/` for the variant
+//! descriptions.
 //!
 //! Compiled only with `--features bench`; the body is feature-gated so a
 //! plain `cargo build` skips it. `criterion_main!` must sit at the crate
@@ -61,7 +62,7 @@ fn throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("throughput_1m");
     group.throughput(criterion::Throughput::Elements(workload.len() as u64));
 
-    group.bench_function("v1_option_b", |b| {
+    group.bench_function("v1", |b| {
         b.iter_custom(|iters| {
             let mut total = Duration::ZERO;
             for _ in 0..iters {
@@ -76,7 +77,7 @@ fn throughput(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("v2_option_a", |b| {
+    group.bench_function("v2", |b| {
         b.iter_custom(|iters| {
             let mut total = Duration::ZERO;
             for _ in 0..iters {

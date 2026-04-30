@@ -1,4 +1,4 @@
-//! One-shot memory measurement binary for engine v1 (option B).
+//! One-shot memory measurement binary for engine v1.
 //!
 //! Drives the synthetic workload through the engine, then reads peak
 //! resident set size via `getrusage(RUSAGE_SELF)` and prints it on stdout

@@ -1,12 +1,13 @@
-//! Alternate engine implementation under storage option A.
+//! Alternate engine implementation with a split tx ledger.
 //!
-//! Where v1 keeps a single `HashMap<u32, TxRecord>` (option B), v2 splits
-//! the ledger into two structures: a `HashMap<u32, DepositRecord>` for
-//! disputable deposits and a `HashSet<u32>` for cross-type id dedup. The
-//! observable contract matches v1 exactly so the same input feeds both
-//! variants in the data-structure benchmark (task 07a). All shared types
-//! (`Account`, `Transaction`, `EngineError`, `DepositRecord`,
-//! `DisputeState`, …) are re-used from v1; only the storage layout differs.
+//! Where v1 keeps a single `HashMap<u32, TxRecord>` whose value is an
+//! enum, v2 splits the ledger into two structures: a
+//! `HashMap<u32, DepositRecord>` for disputable deposits and a
+//! `HashSet<u32>` for cross-type id dedup. The observable contract
+//! matches v1 exactly so the same input feeds both variants in the
+//! data-structure benchmark (task 07a). All shared types (`Account`,
+//! `Transaction`, `EngineError`, `DepositRecord`, `DisputeState`, …)
+//! are re-used from v1; only the storage layout differs.
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -20,7 +21,7 @@ use super::v1::error::EngineError;
 use super::v1::ledger::{DepositRecord, DisputeRejection, DisputeState};
 use super::v1::transaction::Transaction;
 
-/// Option-A payments engine.
+/// Split-ledger payments engine.
 ///
 /// The dedup set carries every tx id seen (deposit and withdrawal alike per
 /// 6a). The deposit map carries the records v1's dispute paths walk; a hit

@@ -6,11 +6,11 @@ Solution to the payments engine challenge.
 
 Two storage layouts coexist under `src/engine/`:
 
-- **v1, option B**: single `HashMap<u32, TxRecord>` where `TxRecord` is an
-  enum (`Deposit(DepositRecord) | Withdrawal`). One source of truth for
-  both dispute lookup and tx-id dedup.
-- **v2, option A**: split layout. `HashMap<u32, DepositRecord>` for
-  disputable deposits plus `HashSet<u32>` for cross-type id dedup.
+- **v1**: single `HashMap<u32, TxRecord>` where `TxRecord` is an enum
+  (`Deposit(DepositRecord) | Withdrawal`). One source of truth for both
+  dispute lookup and tx-id dedup.
+- **v2**: split layout. `HashMap<u32, DepositRecord>` for disputable
+  deposits plus `HashSet<u32>` for cross-type id dedup.
 
 Both expose the same observable contract (`process(Transaction) ->
 Result<(), EngineError>` and an `accounts()` iterator); the integration
@@ -47,32 +47,32 @@ tx/sec on the 1M-tx workload; RSS is peak `ru_maxrss` from
 
 | Variant | Storage | 1M-tx mean ± stddev (ms) | Throughput (Mtx/s) | 10M-tx peak RSS (MiB) |
 |---------|---------|--------------------------|--------------------|-----------------------|
-| v1      | option B (single `HashMap<u32, TxRecord>`) | 102.15 ± 6.23 | 9.79 | 381.5 |
-| v2      | option A (`HashMap<u32, DepositRecord>` + `HashSet<u32>`) | 84.51 ± 8.31 | 11.83 | 326.2 |
+| v1      | single `HashMap<u32, TxRecord>` | 100.75 ± 5.28 | 9.93 | 381.5 |
+| v2      | `HashMap<u32, DepositRecord>` + `HashSet<u32>` | 84.34 ± 6.84 | 11.86 | 326.2 |
 
 ### Findings
 
-- **Option A (v2) wins on both axes.** ~17% faster on throughput and
-  ~14% smaller peak RSS at 10M tx. The dedup-only `HashSet<u32>` carries
-  4-byte keys vs option B's enum-typed `TxRecord` slot (24 bytes due to
-  the `DepositRecord` payload), so withdrawals — 30% of the stream —
+- **v2 wins on both axes.** ~17% faster on throughput and ~14% smaller
+  peak RSS at 10M tx. The dedup-only `HashSet<u32>` carries 4-byte keys
+  vs v1's enum-typed `TxRecord` slot (24 bytes due to the
+  `DepositRecord` payload), so withdrawals — 30% of the stream —
   consume far less memory per row.
 - **The throughput delta tracks branch-prediction and cache locality.**
-  Option B's hot path discriminates `TxRecord::Deposit` vs
-  `TxRecord::Withdrawal` on every dedup and dispute lookup; option A
-  hits the deposit map directly for lifecycle events and the set for
-  dedup, with no enum tag indirection.
-- **Trade-off is drift risk.** Option A holds two collections that have
-  to stay in sync ("every deposit id in the map is also in the set");
-  the engine enforces this via a single insertion point, but a future
-  refactor could break the invariant. Option B trades performance for a
-  single source of truth. At v1 scale (well below 1B tx) both fit
+  v1's hot path discriminates `TxRecord::Deposit` vs
+  `TxRecord::Withdrawal` on every dedup and dispute lookup; v2 hits the
+  deposit map directly for lifecycle events and the set for dedup, with
+  no enum tag indirection.
+- **Trade-off is drift risk.** v2 holds two collections that have to
+  stay in sync ("every deposit id in the map is also in the set"); the
+  engine enforces this via a single insertion point, but a future
+  refactor could break the invariant. v1 trades performance for a
+  single source of truth. At MVP scale (well below 1B tx) both fit
   trivially; at 1B-tx scale neither does and the right answer is
   external storage.
 - **Concurrency is a separate question.** Under a sharded lock (DashMap)
-  option A pays two shard-lock acquisitions per dispute path vs option
-  B's one, so the relative cost can shift. Task 07b explores
-  concurrency holding the storage variant fixed at option B.
+  v2 pays two shard-lock acquisitions per dispute path vs v1's one, so
+  the relative cost can shift. Task 07b explores concurrency holding
+  the storage variant fixed at v1's layout.
 
 ### Scope
 

@@ -39,7 +39,7 @@ fn run_and_normalise(input: &str) -> String {
 
     assert_eq!(
         v1, v2,
-        "engine v2 diverged from v1 on the same input — option A and option B must produce identical observable output",
+        "engine v1 and v2 diverged on the same input — both storage layouts must produce identical observable output",
     );
     v1
 }
