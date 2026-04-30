@@ -15,7 +15,7 @@ pub mod transaction;
 
 use account::Account;
 use error::EngineError;
-use ledger::{DepositRecord, DisputeState, TxRecord};
+use ledger::{DepositRecord, TxRecord};
 use transaction::Transaction;
 
 /// In-memory payments engine.
@@ -89,17 +89,16 @@ impl Engine {
                 if deposit.client() != client {
                     return Err(EngineError::ClientMismatch { client, tx });
                 }
-                if deposit.state() == DisputeState::Disputed {
-                    return Err(EngineError::AlreadyDisputed { client, tx });
-                }
-                let amount = deposit.amount();
-                deposit.mark_disputed();
-                // The deposit was processed earlier, which auto-creates the
-                // account. No code path removes accounts, so the lookup
-                // cannot fail.
+                let amount = deposit
+                    .try_dispute()
+                    .map_err(|_| EngineError::AlreadyDisputed { client, tx })?;
+                // Per Q3 a hold may drive `available` negative, so a hold on
+                // a freshly-created zero account is well-defined; using
+                // `entry` keeps the engine sound even if a future change
+                // breaks the deposit-creates-account invariant.
                 self.accounts
-                    .get_mut(&client)
-                    .expect("account exists since deposit was processed")
+                    .entry(client)
+                    .or_insert_with(|| Account::new(client))
                     .apply_hold(amount);
                 Ok(())
             }
@@ -117,6 +116,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     use super::*;
+    use ledger::DisputeState;
 
     #[test]
     fn process_should_apply_deposit_to_target_client_account() {

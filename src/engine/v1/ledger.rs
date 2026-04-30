@@ -57,13 +57,31 @@ impl DepositRecord {
         self.state
     }
 
-    /// Transition `NotDisputed -> Disputed`. Caller must check the state
-    /// first; the engine surfaces `AlreadyDisputed` rather than allowing a
-    /// silent re-hold.
-    pub fn mark_disputed(&mut self) {
+    /// Transition `NotDisputed -> Disputed` and return the held amount.
+    ///
+    /// Owning the check + setter pair on the record keeps the rule in one
+    /// place; later tasks add `try_resolve` / `try_chargeback` in the same
+    /// shape.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AlreadyDisputed`] when the record is already in `Disputed`
+    /// state. State is left untouched in that case.
+    pub fn try_dispute(&mut self) -> Result<Decimal, AlreadyDisputed> {
+        if self.state == DisputeState::Disputed {
+            return Err(AlreadyDisputed);
+        }
         self.state = DisputeState::Disputed;
+        Ok(self.amount)
     }
 }
+
+/// Returned by [`DepositRecord::try_dispute`] when the record is already in
+/// `Disputed` state. Carries no payload: the engine reattaches the offending
+/// `client`/`tx` when promoting it to
+/// [`super::error::EngineError::AlreadyDisputed`].
+#[derive(Debug, PartialEq, Eq)]
+pub struct AlreadyDisputed;
 
 /// Tx ledger entry. Only `Deposit` exists at this stage; the `Withdrawal`
 /// marker variant lands in task 06 to power cross-type dedup.
@@ -85,10 +103,31 @@ mod tests {
     }
 
     #[test]
-    fn mark_disputed_should_transition_state_to_disputed() {
+    fn try_dispute_should_transition_state_to_disputed_and_return_amount() {
         let mut record = DepositRecord::new(1, "10.0000".parse().unwrap());
 
-        record.mark_disputed();
+        let amount = record.try_dispute().unwrap();
+
+        assert_eq!(amount, "10.0000".parse::<Decimal>().unwrap());
+        assert_eq!(record.state(), DisputeState::Disputed);
+    }
+
+    #[test]
+    fn try_dispute_should_return_already_disputed_when_record_already_disputed() {
+        let mut record = DepositRecord::new(1, "10.0000".parse().unwrap());
+        record.try_dispute().unwrap();
+
+        let err = record.try_dispute().unwrap_err();
+
+        assert_eq!(err, AlreadyDisputed);
+    }
+
+    #[test]
+    fn try_dispute_should_leave_state_disputed_when_record_already_disputed() {
+        let mut record = DepositRecord::new(1, "10.0000".parse().unwrap());
+        record.try_dispute().unwrap();
+
+        let _ = record.try_dispute();
 
         assert_eq!(record.state(), DisputeState::Disputed);
     }
