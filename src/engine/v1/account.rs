@@ -87,6 +87,15 @@ impl Account {
         self.available -= amount;
         self.held += amount;
     }
+
+    /// Inverse of [`Account::apply_hold`]: move `amount` from `held` back to
+    /// `available`. `total` (derived) is unchanged. The engine only calls
+    /// this when the held funds were placed by a matching prior hold, so the
+    /// move never drives `held` below zero in well-formed runs.
+    pub fn apply_release(&mut self, amount: Decimal) {
+        self.held -= amount;
+        self.available += amount;
+    }
 }
 
 /// Returned by [`Account::apply_withdrawal`] when the requested debit would
@@ -241,5 +250,36 @@ mod tests {
         assert_eq!(acct.available(), "-4.0000".parse::<Decimal>().unwrap());
         assert_eq!(acct.held(), "5.0000".parse::<Decimal>().unwrap());
         assert_eq!(acct.total(), "1.0000".parse::<Decimal>().unwrap());
+    }
+
+    #[test]
+    fn apply_release_should_move_amount_from_held_back_to_available() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("10.0000".parse().unwrap());
+        acct.apply_hold("3.0000".parse().unwrap());
+
+        acct.apply_release("3.0000".parse().unwrap());
+
+        assert_eq!(
+            acct,
+            Account {
+                client: 1,
+                available: "10.0000".parse().unwrap(),
+                held: Decimal::ZERO,
+                locked: false,
+            },
+        );
+    }
+
+    #[test]
+    fn apply_release_should_leave_total_unchanged() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("10.0000".parse().unwrap());
+        acct.apply_hold("3.0000".parse().unwrap());
+        let total_before = acct.total();
+
+        acct.apply_release("3.0000".parse().unwrap());
+
+        assert_eq!(acct.total(), total_before);
     }
 }

@@ -74,6 +74,24 @@ impl DepositRecord {
         self.state = DisputeState::Disputed;
         Ok(self.amount)
     }
+
+    /// Transition `Disputed -> NotDisputed` and return the released amount.
+    ///
+    /// Per Q5 a resolved record is behaviorally identical to one that was
+    /// never disputed, so the state machine drops back to `NotDisputed` and
+    /// a future dispute on the same tx is allowed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NotDisputed`] when the record is not currently in
+    /// `Disputed` state. State is left untouched in that case.
+    pub fn try_resolve(&mut self) -> Result<Decimal, NotDisputed> {
+        if self.state != DisputeState::Disputed {
+            return Err(NotDisputed);
+        }
+        self.state = DisputeState::NotDisputed;
+        Ok(self.amount)
+    }
 }
 
 /// Returned by [`DepositRecord::try_dispute`] when the record is already in
@@ -82,6 +100,13 @@ impl DepositRecord {
 /// [`super::error::EngineError::AlreadyDisputed`].
 #[derive(Debug, PartialEq, Eq)]
 pub struct AlreadyDisputed;
+
+/// Returned by [`DepositRecord::try_resolve`] when the record is not in
+/// `Disputed` state. Carries no payload: the engine reattaches the offending
+/// `client`/`tx` when promoting it to
+/// [`super::error::EngineError::NotDisputed`].
+#[derive(Debug, PartialEq, Eq)]
+pub struct NotDisputed;
 
 /// Tx ledger entry. Only `Deposit` exists at this stage; the `Withdrawal`
 /// marker variant lands in task 06 to power cross-type dedup.
@@ -129,6 +154,47 @@ mod tests {
 
         let _ = record.try_dispute();
 
+        assert_eq!(record.state(), DisputeState::Disputed);
+    }
+
+    #[test]
+    fn try_resolve_should_transition_state_to_not_disputed_and_return_amount() {
+        let mut record = DepositRecord::new(1, "10.0000".parse().unwrap());
+        record.try_dispute().unwrap();
+
+        let amount = record.try_resolve().unwrap();
+
+        assert_eq!(amount, "10.0000".parse::<Decimal>().unwrap());
+        assert_eq!(record.state(), DisputeState::NotDisputed);
+    }
+
+    #[test]
+    fn try_resolve_should_return_not_disputed_when_record_not_in_disputed_state() {
+        let mut record = DepositRecord::new(1, "10.0000".parse().unwrap());
+
+        let err = record.try_resolve().unwrap_err();
+
+        assert_eq!(err, NotDisputed);
+    }
+
+    #[test]
+    fn try_resolve_should_leave_state_unchanged_when_record_not_in_disputed_state() {
+        let mut record = DepositRecord::new(1, "10.0000".parse().unwrap());
+
+        let _ = record.try_resolve();
+
+        assert_eq!(record.state(), DisputeState::NotDisputed);
+    }
+
+    #[test]
+    fn try_dispute_should_be_allowed_after_resolve() {
+        let mut record = DepositRecord::new(1, "10.0000".parse().unwrap());
+        record.try_dispute().unwrap();
+        record.try_resolve().unwrap();
+
+        let amount = record.try_dispute().unwrap();
+
+        assert_eq!(amount, "10.0000".parse::<Decimal>().unwrap());
         assert_eq!(record.state(), DisputeState::Disputed);
     }
 }

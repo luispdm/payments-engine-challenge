@@ -77,6 +77,35 @@ dispute,1,1,
 }
 
 #[test]
+fn deposit_dispute_resolve_should_release_held_funds_in_snapshot() {
+    // Client 1: deposits 10, disputes that deposit, resolves it. Funds move
+    // from held back to available; snapshot matches the pre-dispute state.
+    let input = "\
+type,client,tx,amount
+deposit,1,1,10.0000
+dispute,1,1,
+resolve,1,1,
+";
+
+    insta::assert_snapshot!("deposit_dispute_resolve", run_and_normalise(input));
+}
+
+#[test]
+fn redispute_after_resolve_should_hold_funds_again_in_snapshot() {
+    // Per Q5 a deposit may be re-disputed after resolve. End state has 10.0
+    // held and 0 available, identical to a single-dispute run.
+    let input = "\
+type,client,tx,amount
+deposit,1,1,10.0000
+dispute,1,1,
+resolve,1,1,
+dispute,1,1,
+";
+
+    insta::assert_snapshot!("redispute_after_resolve", run_and_normalise(input));
+}
+
+#[test]
 fn deposits_and_withdrawals_should_settle_to_expected_balances() {
     // Client 1: 10 deposited, 3.5 withdrawn, ends at 6.5.
     // Client 2: 4 deposited, attempted 9 withdrawal rejected (insufficient
