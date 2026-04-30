@@ -89,14 +89,10 @@ impl Account {
     }
 
     /// Inverse of [`Account::apply_hold`]: move `amount` from `held` back to
-    /// `available`. `total` (derived) is unchanged. The engine only calls
-    /// this when the held funds were placed by a matching prior hold, so the
-    /// move never drives `held` below zero in well-formed runs. The engine's
-    /// resolve / chargeback paths defensively `entry().or_insert_with` the
-    /// account before calling, mirroring the dispute hold; on a freshly
-    /// inserted zero account this would set `held = -amount`, but the
-    /// `try_resolve` / `try_chargeback` state guard makes that path
-    /// unreachable, and `total = available + held` survives either way.
+    /// `available`. `total` (derived) is unchanged. Callers are expected to
+    /// pass an `amount` backed by a prior matching hold; passing `amount >
+    /// held` violates that contract and drives `held` negative, but the
+    /// `total = available + held` invariant still holds.
     pub fn apply_release(&mut self, amount: Decimal) {
         self.held -= amount;
         self.available += amount;
