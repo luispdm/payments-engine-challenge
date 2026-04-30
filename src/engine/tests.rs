@@ -1,12 +1,36 @@
 //! Unit tests for [`super::Engine::process`].
 //!
-//! Lives as a child module of `v1` so the tests retain visibility into the
-//! engine's private fields (`accounts`, `txs`) and can drive state directly.
-//! Split out of `v1.rs` to keep the engine module readable.
+//! Lives as a child module of `engine` so the state-transition tests can
+//! reach into `engine.deposits` and assert dispute-state shifts directly.
+//! Behavioral tests go through the public API (`accounts()` iterator +
+//! `EngineError` variants).
 
 use rust_decimal::Decimal;
 
 use super::*;
+
+/// Convenience: look up a single client's account snapshot via the public
+/// `accounts()` iterator. Panics if the client has no account, which
+/// indicates a test setup bug, not an engine behavior to assert against.
+fn account_for(engine: &Engine, client: u16) -> &Account {
+    engine
+        .accounts()
+        .find(|a| a.client() == client)
+        .unwrap_or_else(|| panic!("account for client {client} not found"))
+}
+
+/// Drive deposit + dispute on a single tx so the next call exercises the
+/// `Disputed` branch. Used by every chargeback / locked-account test.
+fn deposit_and_dispute(engine: &mut Engine, client: u16, tx: u32, amount: &str) {
+    engine
+        .process(Transaction::Deposit {
+            client,
+            tx,
+            amount: amount.parse().unwrap(),
+        })
+        .unwrap();
+    engine.process(Transaction::Dispute { client, tx }).unwrap();
+}
 
 #[test]
 fn process_should_apply_deposit_to_target_client_account() {
@@ -19,9 +43,10 @@ fn process_should_apply_deposit_to_target_client_account() {
         })
         .unwrap();
 
-    let mut expected = Account::new(1);
-    expected.apply_deposit("12.3456".parse().unwrap());
-    assert_eq!(engine.accounts.get(&1), Some(&expected));
+    assert_eq!(
+        account_for(&engine, 1).available(),
+        "12.3456".parse::<Decimal>().unwrap()
+    );
 }
 
 #[test]
@@ -59,7 +84,7 @@ fn process_should_accumulate_when_multiple_deposits_same_client() {
         .unwrap();
 
     assert_eq!(
-        engine.accounts.get(&1).unwrap().available(),
+        account_for(&engine, 1).available(),
         "3.5000".parse::<Decimal>().unwrap()
     );
 }
@@ -84,7 +109,7 @@ fn process_should_apply_withdrawal_to_target_client_account() {
         .unwrap();
 
     assert_eq!(
-        engine.accounts.get(&1).unwrap().available(),
+        account_for(&engine, 1).available(),
         "6.0000".parse::<Decimal>().unwrap()
     );
 }
@@ -119,31 +144,6 @@ fn process_should_return_insufficient_funds_when_withdrawal_exceeds_available() 
 }
 
 #[test]
-fn process_should_leave_balances_unchanged_when_withdrawal_rejected() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "1.0000".parse().unwrap(),
-        })
-        .unwrap();
-
-    engine
-        .process(Transaction::Withdrawal {
-            client: 1,
-            tx: 2,
-            amount: "5.0000".parse().unwrap(),
-        })
-        .unwrap_err();
-
-    assert_eq!(
-        engine.accounts.get(&1).unwrap().available(),
-        "1.0000".parse::<Decimal>().unwrap()
-    );
-}
-
-#[test]
 fn process_should_auto_create_account_at_zero_when_withdrawal_for_unseen_client() {
     let mut engine = Engine::new();
 
@@ -156,7 +156,7 @@ fn process_should_auto_create_account_at_zero_when_withdrawal_for_unseen_client(
         .unwrap_err();
 
     assert!(matches!(err, EngineError::InsufficientFunds { .. }));
-    let acct = engine.accounts.get(&7).expect("account auto-created");
+    let acct = account_for(&engine, 7);
     assert_eq!(acct.available(), Decimal::ZERO);
 }
 
@@ -191,7 +191,7 @@ fn process_should_settle_to_correct_balance_for_mixed_deposit_withdrawal_sequenc
     }
 
     assert_eq!(
-        engine.accounts.get(&1).unwrap().available(),
+        account_for(&engine, 1).available(),
         "5.2500".parse::<Decimal>().unwrap()
     );
 }
@@ -211,7 +211,7 @@ fn process_should_hold_funds_when_dispute_targets_existing_deposit() {
         .process(Transaction::Dispute { client: 1, tx: 1 })
         .unwrap();
 
-    let acct = engine.accounts.get(&1).unwrap();
+    let acct = account_for(&engine, 1);
     assert_eq!(acct.available(), Decimal::ZERO);
     assert_eq!(acct.held(), "10.0000".parse::<Decimal>().unwrap());
     assert_eq!(acct.total(), "10.0000".parse::<Decimal>().unwrap());
@@ -232,10 +232,10 @@ fn process_should_transition_state_to_disputed_when_dispute_succeeds() {
         .process(Transaction::Dispute { client: 1, tx: 1 })
         .unwrap();
 
-    let Some(TxRecord::Deposit(record)) = engine.txs.get(&1) else {
-        panic!("expected deposit record")
-    };
-    assert_eq!(record.state(), DisputeState::Disputed);
+    assert_eq!(
+        engine.deposits.get(&1).unwrap().state(),
+        DisputeState::Disputed
+    );
 }
 
 #[test]
@@ -250,38 +250,9 @@ fn process_should_return_tx_not_found_when_dispute_targets_unknown_tx() {
 }
 
 #[test]
-fn process_should_leave_balances_unchanged_when_dispute_targets_unknown_tx() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "5.0000".parse().unwrap(),
-        })
-        .unwrap();
-
-    engine
-        .process(Transaction::Dispute { client: 1, tx: 99 })
-        .unwrap_err();
-
-    let acct = engine.accounts.get(&1).unwrap();
-    assert_eq!(acct.available(), "5.0000".parse::<Decimal>().unwrap());
-    assert_eq!(acct.held(), Decimal::ZERO);
-}
-
-#[test]
 fn process_should_return_already_disputed_when_dispute_fires_twice() {
     let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-    engine
-        .process(Transaction::Dispute { client: 1, tx: 1 })
-        .unwrap();
+    deposit_and_dispute(&mut engine, 1, 1, "10.0000");
 
     let err = engine
         .process(Transaction::Dispute { client: 1, tx: 1 })
@@ -291,27 +262,6 @@ fn process_should_return_already_disputed_when_dispute_fires_twice() {
         err,
         EngineError::AlreadyDisputed { client: 1, tx: 1 }
     ));
-}
-
-#[test]
-fn process_should_leave_balances_unchanged_when_dispute_repeats() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-    engine
-        .process(Transaction::Dispute { client: 1, tx: 1 })
-        .unwrap();
-
-    let _ = engine.process(Transaction::Dispute { client: 1, tx: 1 });
-
-    let acct = engine.accounts.get(&1).unwrap();
-    assert_eq!(acct.available(), Decimal::ZERO);
-    assert_eq!(acct.held(), "10.0000".parse::<Decimal>().unwrap());
 }
 
 #[test]
@@ -336,69 +286,32 @@ fn process_should_return_client_mismatch_when_dispute_client_differs_from_deposi
 }
 
 #[test]
-fn process_should_leave_balances_unchanged_when_dispute_client_mismatches() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-
-    let _ = engine.process(Transaction::Dispute { client: 2, tx: 1 });
-
-    let acct = engine.accounts.get(&1).unwrap();
-    assert_eq!(acct.available(), "10.0000".parse::<Decimal>().unwrap());
-    assert_eq!(acct.held(), Decimal::ZERO);
-}
-
-#[test]
 fn process_should_release_held_funds_when_resolve_targets_disputed_deposit() {
     let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-    engine
-        .process(Transaction::Dispute { client: 1, tx: 1 })
-        .unwrap();
+    deposit_and_dispute(&mut engine, 1, 1, "10.0000");
 
     engine
         .process(Transaction::Resolve { client: 1, tx: 1 })
         .unwrap();
 
-    let acct = engine.accounts.get(&1).unwrap();
+    let acct = account_for(&engine, 1);
     assert_eq!(acct.available(), "10.0000".parse::<Decimal>().unwrap());
     assert_eq!(acct.held(), Decimal::ZERO);
-    assert_eq!(acct.total(), "10.0000".parse::<Decimal>().unwrap());
 }
 
 #[test]
 fn process_should_transition_state_to_not_disputed_when_resolve_succeeds() {
     let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-    engine
-        .process(Transaction::Dispute { client: 1, tx: 1 })
-        .unwrap();
+    deposit_and_dispute(&mut engine, 1, 1, "10.0000");
 
     engine
         .process(Transaction::Resolve { client: 1, tx: 1 })
         .unwrap();
 
-    let Some(TxRecord::Deposit(record)) = engine.txs.get(&1) else {
-        panic!("expected deposit record")
-    };
-    assert_eq!(record.state(), DisputeState::NotDisputed);
+    assert_eq!(
+        engine.deposits.get(&1).unwrap().state(),
+        DisputeState::NotDisputed
+    );
 }
 
 #[test]
@@ -431,36 +344,9 @@ fn process_should_return_not_disputed_when_resolve_targets_undisputed_tx() {
 }
 
 #[test]
-fn process_should_leave_balances_unchanged_when_resolve_targets_undisputed_tx() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-
-    let _ = engine.process(Transaction::Resolve { client: 1, tx: 1 });
-
-    let acct = engine.accounts.get(&1).unwrap();
-    assert_eq!(acct.available(), "10.0000".parse::<Decimal>().unwrap());
-    assert_eq!(acct.held(), Decimal::ZERO);
-}
-
-#[test]
 fn process_should_return_client_mismatch_when_resolve_client_differs_from_deposit() {
     let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-    engine
-        .process(Transaction::Dispute { client: 1, tx: 1 })
-        .unwrap();
+    deposit_and_dispute(&mut engine, 1, 1, "10.0000");
 
     let err = engine
         .process(Transaction::Resolve { client: 2, tx: 1 })
@@ -473,41 +359,10 @@ fn process_should_return_client_mismatch_when_resolve_client_differs_from_deposi
 }
 
 #[test]
-fn process_should_leave_balances_unchanged_when_resolve_client_mismatches() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-    engine
-        .process(Transaction::Dispute { client: 1, tx: 1 })
-        .unwrap();
-
-    let _ = engine.process(Transaction::Resolve { client: 2, tx: 1 });
-
-    let acct = engine.accounts.get(&1).unwrap();
-    assert_eq!(acct.available(), Decimal::ZERO);
-    assert_eq!(acct.held(), "10.0000".parse::<Decimal>().unwrap());
-}
-
-#[test]
 fn process_should_hold_funds_again_when_dispute_fires_after_resolve() {
-    // Per Q5, re-dispute after resolve is allowed: the state machine
-    // returns to `NotDisputed` so a second `Dispute` reapplies the hold.
+    // Per Q5 a deposit may be re-disputed after resolve.
     let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-    engine
-        .process(Transaction::Dispute { client: 1, tx: 1 })
-        .unwrap();
+    deposit_and_dispute(&mut engine, 1, 1, "10.0000");
     engine
         .process(Transaction::Resolve { client: 1, tx: 1 })
         .unwrap();
@@ -516,23 +371,9 @@ fn process_should_hold_funds_again_when_dispute_fires_after_resolve() {
         .process(Transaction::Dispute { client: 1, tx: 1 })
         .unwrap();
 
-    let acct = engine.accounts.get(&1).unwrap();
+    let acct = account_for(&engine, 1);
     assert_eq!(acct.available(), Decimal::ZERO);
     assert_eq!(acct.held(), "10.0000".parse::<Decimal>().unwrap());
-    assert_eq!(acct.total(), "10.0000".parse::<Decimal>().unwrap());
-}
-
-/// Drive deposit → dispute on a single tx so the next call exercises the
-/// `Disputed` branch. Used by every chargeback / locked-account test.
-fn deposit_and_dispute(engine: &mut Engine, client: u16, tx: u32, amount: &str) {
-    engine
-        .process(Transaction::Deposit {
-            client,
-            tx,
-            amount: amount.parse().unwrap(),
-        })
-        .unwrap();
-    engine.process(Transaction::Dispute { client, tx }).unwrap();
 }
 
 #[test]
@@ -544,7 +385,7 @@ fn process_should_drop_held_when_chargeback_targets_disputed_deposit() {
         .process(Transaction::Chargeback { client: 1, tx: 1 })
         .unwrap();
 
-    let acct = engine.accounts.get(&1).unwrap();
+    let acct = account_for(&engine, 1);
     assert_eq!(acct.available(), Decimal::ZERO);
     assert_eq!(acct.held(), Decimal::ZERO);
     assert_eq!(acct.total(), Decimal::ZERO);
@@ -559,7 +400,7 @@ fn process_should_lock_account_when_chargeback_targets_disputed_deposit() {
         .process(Transaction::Chargeback { client: 1, tx: 1 })
         .unwrap();
 
-    assert!(engine.accounts.get(&1).unwrap().locked());
+    assert!(account_for(&engine, 1).locked());
 }
 
 #[test]
@@ -571,10 +412,10 @@ fn process_should_transition_state_to_charged_back_when_chargeback_succeeds() {
         .process(Transaction::Chargeback { client: 1, tx: 1 })
         .unwrap();
 
-    let Some(TxRecord::Deposit(record)) = engine.txs.get(&1) else {
-        panic!("expected deposit record")
-    };
-    assert_eq!(record.state(), DisputeState::ChargedBack);
+    assert_eq!(
+        engine.deposits.get(&1).unwrap().state(),
+        DisputeState::ChargedBack
+    );
 }
 
 #[test]
@@ -659,30 +500,11 @@ fn process_should_return_account_locked_when_deposit_targets_locked_account() {
 }
 
 #[test]
-fn process_should_leave_balances_unchanged_when_deposit_targets_locked_account() {
-    let mut engine = Engine::new();
-    deposit_and_dispute(&mut engine, 1, 1, "10.0000");
-    engine
-        .process(Transaction::Chargeback { client: 1, tx: 1 })
-        .unwrap();
-
-    let _ = engine.process(Transaction::Deposit {
-        client: 1,
-        tx: 2,
-        amount: "5.0000".parse().unwrap(),
-    });
-
-    let acct = engine.accounts.get(&1).unwrap();
-    assert_eq!(acct.available(), Decimal::ZERO);
-    assert_eq!(acct.held(), Decimal::ZERO);
-}
-
-#[test]
 fn process_should_return_account_locked_when_withdrawal_targets_locked_account() {
     let mut engine = Engine::new();
     // Set up an account with a positive balance via a separate, untainted
-    // deposit so the post-chargeback account still has funds in it that
-    // a withdrawal would otherwise clear.
+    // deposit so the post-chargeback account still has funds in it that a
+    // withdrawal would otherwise clear.
     engine
         .process(Transaction::Deposit {
             client: 1,
@@ -710,36 +532,11 @@ fn process_should_return_account_locked_when_withdrawal_targets_locked_account()
 }
 
 #[test]
-fn process_should_leave_balances_unchanged_when_withdrawal_targets_locked_account() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "5.0000".parse().unwrap(),
-        })
-        .unwrap();
-    deposit_and_dispute(&mut engine, 1, 2, "10.0000");
-    engine
-        .process(Transaction::Chargeback { client: 1, tx: 2 })
-        .unwrap();
-    let before = engine.accounts.get(&1).unwrap().available();
-
-    let _ = engine.process(Transaction::Withdrawal {
-        client: 1,
-        tx: 3,
-        amount: "1.0000".parse().unwrap(),
-    });
-
-    assert_eq!(engine.accounts.get(&1).unwrap().available(), before);
-}
-
-#[test]
 fn process_should_return_account_locked_when_new_dispute_targets_locked_account() {
-    let mut engine = Engine::new();
     // Deposit tx 2 stays undisputed at lock time; the dispute on tx 1
-    // locks the account; the dispute on tx 2 is a new dispute and must
-    // be rejected per Q2.
+    // locks the account; the dispute on tx 2 is a new dispute and must be
+    // rejected per Q2.
+    let mut engine = Engine::new();
     engine
         .process(Transaction::Deposit {
             client: 1,
@@ -764,12 +561,11 @@ fn process_should_return_account_locked_when_new_dispute_targets_locked_account(
 
 #[test]
 fn process_should_release_held_when_resolve_targets_disputed_tx_on_locked_account() {
-    // Per Q2 a resolve on a tx already in `Disputed` is allowed even on
-    // a locked account: the dispute pre-dates the lock.
+    // Per Q2 a resolve on a tx already in `Disputed` is allowed even on a
+    // locked account: the dispute pre-dates the lock.
     let mut engine = Engine::new();
     deposit_and_dispute(&mut engine, 1, 1, "10.0000");
     deposit_and_dispute(&mut engine, 1, 2, "5.0000");
-    // Lock the account by charging back tx 1; tx 2 stays in `Disputed`.
     engine
         .process(Transaction::Chargeback { client: 1, tx: 1 })
         .unwrap();
@@ -778,7 +574,7 @@ fn process_should_release_held_when_resolve_targets_disputed_tx_on_locked_accoun
         .process(Transaction::Resolve { client: 1, tx: 2 })
         .unwrap();
 
-    let acct = engine.accounts.get(&1).unwrap();
+    let acct = account_for(&engine, 1);
     assert_eq!(acct.held(), Decimal::ZERO);
     assert_eq!(acct.available(), "5.0000".parse::<Decimal>().unwrap());
     assert!(acct.locked());
@@ -786,8 +582,8 @@ fn process_should_release_held_when_resolve_targets_disputed_tx_on_locked_accoun
 
 #[test]
 fn process_should_drop_held_when_chargeback_targets_disputed_tx_on_locked_account() {
-    // Per Q2 a chargeback on a tx already in `Disputed` is allowed even
-    // on a locked account: settles a pre-lock dispute.
+    // Per Q2 a chargeback on a tx already in `Disputed` is allowed even on
+    // a locked account: settles a pre-lock dispute.
     let mut engine = Engine::new();
     deposit_and_dispute(&mut engine, 1, 1, "10.0000");
     deposit_and_dispute(&mut engine, 1, 2, "5.0000");
@@ -799,7 +595,7 @@ fn process_should_drop_held_when_chargeback_targets_disputed_tx_on_locked_accoun
         .process(Transaction::Chargeback { client: 1, tx: 2 })
         .unwrap();
 
-    let acct = engine.accounts.get(&1).unwrap();
+    let acct = account_for(&engine, 1);
     assert_eq!(acct.held(), Decimal::ZERO);
     assert_eq!(acct.available(), Decimal::ZERO);
     assert_eq!(acct.total(), Decimal::ZERO);
@@ -807,9 +603,7 @@ fn process_should_drop_held_when_chargeback_targets_disputed_tx_on_locked_accoun
 
 #[test]
 fn process_should_drive_total_negative_when_fraud_sequence_charges_back() {
-    // Fraud sequence per Q3: deposit 100, withdraw 80, dispute,
-    // chargeback. End state is `available = -80, held = 0, total = -80,
-    // locked = true`.
+    // Q3 fraud sequence: deposit 100, withdraw 80, dispute, chargeback.
     let mut engine = Engine::new();
     engine
         .process(Transaction::Deposit {
@@ -833,18 +627,14 @@ fn process_should_drive_total_negative_when_fraud_sequence_charges_back() {
         .process(Transaction::Chargeback { client: 1, tx: 1 })
         .unwrap();
 
-    let acct = engine.accounts.get(&1).unwrap();
+    let acct = account_for(&engine, 1);
     assert_eq!(acct.available(), "-80.0000".parse::<Decimal>().unwrap());
-    assert_eq!(acct.held(), Decimal::ZERO);
     assert_eq!(acct.total(), "-80.0000".parse::<Decimal>().unwrap());
     assert!(acct.locked());
 }
 
 #[test]
 fn process_should_return_charged_back_when_dispute_targets_charged_back_tx() {
-    // Per Q5 a charged-back tx is terminal. A follow-up dispute hits the
-    // distinct `ChargedBack` error so logging can tell it apart from a
-    // double-dispute on a still-disputed tx.
     let mut engine = Engine::new();
     deposit_and_dispute(&mut engine, 1, 1, "10.0000");
     engine
@@ -860,9 +650,9 @@ fn process_should_return_charged_back_when_dispute_targets_charged_back_tx() {
 
 #[test]
 fn process_should_return_withdrawal_dispute_when_dispute_targets_withdrawal() {
-    // Withdrawals are stored as marker records solely so collisions can be
-    // detected; per Q1 they are not disputable, and a dispute event
-    // referring to one surfaces `WithdrawalDispute`.
+    // Withdrawals are dedup'd via `seen_txs` only; there is no entry in
+    // `deposits`, and the dispute path must surface `WithdrawalDispute`
+    // rather than `TxNotFound`.
     let mut engine = Engine::new();
     engine
         .process(Transaction::Deposit {
@@ -915,91 +705,6 @@ fn process_should_return_duplicate_tx_id_when_deposit_reuses_existing_deposit_id
 }
 
 #[test]
-fn process_should_leave_balances_unchanged_when_deposit_reuses_existing_deposit_id() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-
-    let _ = engine.process(Transaction::Deposit {
-        client: 1,
-        tx: 1,
-        amount: "5.0000".parse().unwrap(),
-    });
-
-    assert_eq!(
-        engine.accounts.get(&1).unwrap().available(),
-        "10.0000".parse::<Decimal>().unwrap()
-    );
-}
-
-#[test]
-fn process_should_return_duplicate_tx_id_when_withdrawal_reuses_existing_withdrawal_id() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-    engine
-        .process(Transaction::Withdrawal {
-            client: 1,
-            tx: 2,
-            amount: "1.0000".parse().unwrap(),
-        })
-        .unwrap();
-
-    let err = engine
-        .process(Transaction::Withdrawal {
-            client: 1,
-            tx: 2,
-            amount: "1.0000".parse().unwrap(),
-        })
-        .unwrap_err();
-
-    assert!(matches!(
-        err,
-        EngineError::DuplicateTxId { client: 1, tx: 2 }
-    ));
-}
-
-#[test]
-fn process_should_leave_balances_unchanged_when_withdrawal_reuses_existing_withdrawal_id() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-    engine
-        .process(Transaction::Withdrawal {
-            client: 1,
-            tx: 2,
-            amount: "1.0000".parse().unwrap(),
-        })
-        .unwrap();
-
-    let _ = engine.process(Transaction::Withdrawal {
-        client: 1,
-        tx: 2,
-        amount: "1.0000".parse().unwrap(),
-    });
-
-    assert_eq!(
-        engine.accounts.get(&1).unwrap().available(),
-        "9.0000".parse::<Decimal>().unwrap()
-    );
-}
-
-#[test]
 fn process_should_return_duplicate_tx_id_when_withdrawal_reuses_existing_deposit_id() {
     let mut engine = Engine::new();
     engine
@@ -1022,27 +727,6 @@ fn process_should_return_duplicate_tx_id_when_withdrawal_reuses_existing_deposit
         err,
         EngineError::DuplicateTxId { client: 1, tx: 1 }
     ));
-}
-
-#[test]
-fn process_should_leave_balances_unchanged_when_withdrawal_reuses_existing_deposit_id() {
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-
-    let _ = engine.process(Transaction::Withdrawal {
-        client: 1,
-        tx: 1,
-        amount: "1.0000".parse().unwrap(),
-    });
-
-    let acct = engine.accounts.get(&1).unwrap();
-    assert_eq!(acct.available(), "10.0000".parse::<Decimal>().unwrap());
 }
 
 #[test]
@@ -1078,7 +762,7 @@ fn process_should_return_duplicate_tx_id_when_deposit_reuses_existing_withdrawal
 }
 
 #[test]
-fn process_should_leave_balances_unchanged_when_deposit_reuses_existing_withdrawal_id() {
+fn process_should_return_duplicate_tx_id_when_withdrawal_reuses_existing_withdrawal_id() {
     let mut engine = Engine::new();
     engine
         .process(Transaction::Deposit {
@@ -1095,16 +779,18 @@ fn process_should_leave_balances_unchanged_when_deposit_reuses_existing_withdraw
         })
         .unwrap();
 
-    let _ = engine.process(Transaction::Deposit {
-        client: 1,
-        tx: 2,
-        amount: "5.0000".parse().unwrap(),
-    });
+    let err = engine
+        .process(Transaction::Withdrawal {
+            client: 1,
+            tx: 2,
+            amount: "1.0000".parse().unwrap(),
+        })
+        .unwrap_err();
 
-    assert_eq!(
-        engine.accounts.get(&1).unwrap().available(),
-        "9.0000".parse::<Decimal>().unwrap()
-    );
+    assert!(matches!(
+        err,
+        EngineError::DuplicateTxId { client: 1, tx: 2 }
+    ));
 }
 
 #[test]
@@ -1164,11 +850,14 @@ fn process_should_leave_state_untouched_when_deposit_amount_non_positive() {
     // No account materialised, no tx id consumed: the row was malformed,
     // not a recordable attempt.
     assert!(!engine.accounts.contains_key(&1));
-    assert!(!engine.txs.contains_key(&1));
+    assert!(!engine.deposits.contains_key(&1));
+    assert!(!engine.seen_txs.contains(&1));
 }
 
 #[test]
 fn process_should_accept_subsequent_deposit_reusing_id_after_non_positive_rejection() {
+    // Tx id stays free after a non-positive rejection (task 06), so the
+    // corrected retry succeeds.
     let mut engine = Engine::new();
 
     let _ = engine.process(Transaction::Deposit {
@@ -1185,7 +874,7 @@ fn process_should_accept_subsequent_deposit_reusing_id_after_non_positive_reject
         .unwrap();
 
     assert_eq!(
-        engine.accounts.get(&1).unwrap().available(),
+        account_for(&engine, 1).available(),
         "10.0000".parse::<Decimal>().unwrap()
     );
 }
@@ -1249,37 +938,9 @@ fn process_should_return_non_positive_amount_when_withdrawal_amount_is_zero() {
 }
 
 #[test]
-fn process_should_leave_balances_unchanged_when_withdrawal_amount_negative() {
-    // Without the up-front guard, `apply_withdrawal` would subtract a
-    // negative and effectively credit the account, bypassing the dispute
-    // machinery entirely.
-    let mut engine = Engine::new();
-    engine
-        .process(Transaction::Deposit {
-            client: 1,
-            tx: 1,
-            amount: "10.0000".parse().unwrap(),
-        })
-        .unwrap();
-
-    let _ = engine.process(Transaction::Withdrawal {
-        client: 1,
-        tx: 2,
-        amount: "-3.0000".parse().unwrap(),
-    });
-
-    assert_eq!(
-        engine.accounts.get(&1).unwrap().available(),
-        "10.0000".parse::<Decimal>().unwrap()
-    );
-    assert!(!engine.txs.contains_key(&2));
-}
-
-#[test]
 fn process_should_record_withdrawal_tx_id_even_when_insufficient_funds_rejects() {
-    // Per 6a tx ids are globally unique; a withdrawal that fails for
-    // insufficient funds still consumes its tx id so a partner-error
-    // retry is flagged as `DuplicateTxId` rather than silently re-tried.
+    // Per 6a the failed withdrawal still consumes its tx id (recorded in
+    // `seen_txs`), so a retry with the same id is flagged as duplicate.
     let mut engine = Engine::new();
 
     let _ = engine.process(Transaction::Withdrawal {

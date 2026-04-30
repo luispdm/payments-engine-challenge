@@ -1,10 +1,10 @@
 //! Integration tests driving CSVs through `lib::run`.
 //!
 //! Snapshots are normalised by sorting data rows on `client` before
-//! recording, so the spec's "output order is unconstrained" property
-//! does not surface as snapshot churn.
+//! recording, so the spec's "output order is unconstrained" property does
+//! not surface as snapshot churn.
 
-use payments_engine_challenge::{run, run_v2};
+use payments_engine_challenge::run;
 
 fn normalise(raw: &str) -> String {
     let mut lines = raw.lines();
@@ -22,26 +22,10 @@ fn normalise(raw: &str) -> String {
     normalised
 }
 
-/// Drive `input` through the default (v1) pipeline AND through v2,
-/// asserting their byte-for-byte equality on the normalised output. The
-/// returned string is v1's snapshot — v2 producing anything else would
-/// have aborted the test before this point. Cross-checking on every
-/// scenario gives the v1/v2 observable-contract invariant test coverage
-/// without forcing a parallel snapshot tree.
 fn run_and_normalise(input: &str) -> String {
-    let mut v1_out = Vec::new();
-    run(input.as_bytes(), &mut v1_out).unwrap();
-    let v1 = normalise(&String::from_utf8(v1_out).unwrap());
-
-    let mut v2_out = Vec::new();
-    run_v2(input.as_bytes(), &mut v2_out).unwrap();
-    let v2 = normalise(&String::from_utf8(v2_out).unwrap());
-
-    assert_eq!(
-        v1, v2,
-        "engine v1 and v2 diverged on the same input — both storage layouts must produce identical observable output",
-    );
-    v1
+    let mut out = Vec::new();
+    run(input.as_bytes(), &mut out).unwrap();
+    normalise(&String::from_utf8(out).unwrap())
 }
 
 #[test]

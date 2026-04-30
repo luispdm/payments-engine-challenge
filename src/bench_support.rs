@@ -1,17 +1,14 @@
-//! Synthetic workload generator for the engine benchmarks (task 07a, reused
-//! by 07b). Output is deterministic for a given `(seed, clients, tx_count)`
-//! triple so successive runs of the same harness are directly comparable
-//! and the cross-engine correctness gate has a stable oracle.
+//! Synthetic workload generator for the engine benchmarks (07b reuses
+//! this). Output is deterministic for a given `(seed, clients, tx_count)`
+//! triple so successive runs of the same harness are directly comparable.
 //!
 //! Gated behind the `bench` feature: production builds carry no `rand`
-//! dependency. The module is a leaf — it pulls only from `engine::v1` for
-//! the [`Transaction`] type so v2 can consume the same `Vec<Transaction>`
-//! without introducing a back-edge to `bench_support`.
+//! dependency.
 
 use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use rust_decimal::Decimal;
 
-use crate::engine::v1::transaction::Transaction;
+use crate::engine::transaction::Transaction;
 
 /// Default seed for the bundled workloads. Pinning a constant means the
 /// throughput and memory bins are reproducible across runs and machines.

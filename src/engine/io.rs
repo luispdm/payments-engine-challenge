@@ -1,11 +1,9 @@
-//! Shared CSV serde glue used by every engine variant.
+//! CSV serde glue.
 //!
-//! Both v1 and v2 expose the same observable contract (`process(Transaction)
-//! -> Result<(), EngineError>` plus an iterator over [`Account`]); the two
-//! variants therefore share one input driver and one output writer. The
-//! driver is parameterized over a `process` closure rather than a trait so
-//! the engines can stay concrete types per the swap-mechanism decision in
-//! `~/payments-engine-challenge-docs/decisions.md`.
+//! The driver is parameterized over a `process` closure rather than a
+//! method on [`super::Engine`] so future concurrency variants can plug in
+//! without sharing a trait surface (per the engine-swap decision in
+//! `~/payments-engine-challenge-docs/decisions.md`).
 //!
 //! Per task 06 partner errors stay row-local: per-row CSV deserialize
 //! failures and engine errors that the spec instructs us to ignore are
@@ -17,9 +15,23 @@ use std::io::{Read, Write};
 
 use anyhow::Context;
 
-use super::v1::account::Account;
-use super::v1::error::EngineError;
-use super::v1::transaction::{RawTransaction, Transaction};
+use super::Engine;
+use super::account::Account;
+use super::error::EngineError;
+use super::transaction::{RawTransaction, Transaction};
+
+/// Read transactions from `input`, drive the engine, then write the
+/// resulting account snapshots to `output`.
+///
+/// # Errors
+///
+/// Propagates structural IO failures from the underlying readers and
+/// writers; per-row partner errors are logged and skipped.
+pub fn run<R: Read, W: Write>(input: R, output: W) -> anyhow::Result<()> {
+    let mut engine = Engine::new();
+    drive_input(input, |tx| engine.process(tx))?;
+    write_snapshots(output, engine.accounts())
+}
 
 /// Stream rows from `input` and feed each parsed [`Transaction`] to
 /// `process`. Per-row partner errors emit `log::warn!`; structural IO
@@ -97,7 +109,6 @@ where
 mod tests {
     use rust_decimal::Decimal;
 
-    use super::super::v1::Engine;
     use super::*;
 
     fn run_csv(input: &str) -> Engine {

@@ -23,18 +23,3 @@ thiserror = "2"
 [dev-dependencies]
 criterion = "0.8"
 insta = "1"
-
-[[bench]]
-name = "throughput"
-harness = false
-required-features = ["bench"]
-
-[[bin]]
-name = "mem_v1"
-path = "src/bin/mem_v1.rs"
-required-features = ["bench"]
-
-[[bin]]
-name = "mem_v2"
-path = "src/bin/mem_v2.rs"
-required-features = ["bench"]
