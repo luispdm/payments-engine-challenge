@@ -1,0 +1,7 @@
+---
+source: tests/scenarios.rs
+assertion_line: 188
+expression: run_and_normalise(input)
+---
+client,available,held,total,locked
+1,15.0000,0.0000,15.0000,false

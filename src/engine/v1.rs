@@ -6,6 +6,7 @@
 //! and post-chargeback lock semantics ship in this version.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 pub mod account;
 pub mod error;
@@ -37,20 +38,25 @@ impl Engine {
 
     /// Apply `tx` to the engine state.
     ///
-    /// All five transaction kinds are now wired in. Lock semantics (Q2):
-    /// once an account has been frozen by a chargeback, subsequent deposits,
+    /// All five transaction kinds are wired in. Lock semantics (Q2): once an
+    /// account has been frozen by a chargeback, subsequent deposits,
     /// withdrawals, and *new* disputes are rejected. Resolves and chargebacks
     /// targeting txs already in `Disputed` state still process so disputes
-    /// opened before the freeze can settle.
+    /// opened before the freeze can settle. Per 6a the engine also dedups
+    /// every deposit / withdrawal tx id across types: a second event reusing
+    /// an existing id is rejected without touching account state.
     ///
     /// # Errors
     ///
     /// - [`EngineError::InsufficientFunds`] when a withdrawal would drive
     ///   `available` below zero.
+    /// - [`EngineError::DuplicateTxId`] when a deposit or withdrawal reuses
+    ///   a tx id already present in the ledger (deposit/deposit,
+    ///   withdrawal/withdrawal, or cross-type collision).
     /// - [`EngineError::TxNotFound`] when a dispute / resolve / chargeback
     ///   references an unknown tx id.
-    /// - [`EngineError::WithdrawalDispute`] when a dispute references a
-    ///   withdrawal (unreachable until task 06 stores withdrawal markers).
+    /// - [`EngineError::WithdrawalDispute`] when a dispute / resolve /
+    ///   chargeback references a withdrawal (per Q1 not disputable).
     /// - [`EngineError::AlreadyDisputed`] when a dispute fires against a tx
     ///   already in `Disputed` state (idempotent re-dispute, per Q5).
     /// - [`EngineError::ChargedBack`] when a dispute fires against a tx in
@@ -64,27 +70,36 @@ impl Engine {
     ///   dispute targets an account locked by a prior chargeback.
     ///
     /// Per spec the driver swallows all of the above; variants are returned
-    /// so logging can attach in task 06.
+    /// so the driver loop can downgrade them to `log::warn!`.
     pub fn process(&mut self, tx: Transaction) -> Result<(), EngineError> {
         match tx {
             Transaction::Deposit { client, tx, amount } => {
                 if Self::account_locked(&self.accounts, client) {
                     return Err(EngineError::AccountLocked { client, tx });
                 }
+                let Entry::Vacant(slot) = self.txs.entry(tx) else {
+                    return Err(EngineError::DuplicateTxId { client, tx });
+                };
                 self.accounts
                     .entry(client)
                     .or_insert_with(|| Account::new(client))
                     .apply_deposit(amount);
-                // Task 06 will add duplicate-tx-id detection here; for now
-                // valid input guarantees uniqueness.
-                self.txs
-                    .insert(tx, TxRecord::Deposit(DepositRecord::new(client, amount)));
+                slot.insert(TxRecord::Deposit(DepositRecord::new(client, amount)));
                 Ok(())
             }
             Transaction::Withdrawal { client, tx, amount } => {
                 if Self::account_locked(&self.accounts, client) {
                     return Err(EngineError::AccountLocked { client, tx });
                 }
+                let Entry::Vacant(slot) = self.txs.entry(tx) else {
+                    return Err(EngineError::DuplicateTxId { client, tx });
+                };
+                // Reserve the tx id before attempting the debit so that an
+                // insufficient-funds rejection still consumes the id; per
+                // spec tx ids are globally unique, and a partner-error retry
+                // with the same id should be flagged as a duplicate rather
+                // than silently re-attempted.
+                slot.insert(TxRecord::Withdrawal);
                 self.accounts
                     .entry(client)
                     .or_insert_with(|| Account::new(client))
@@ -110,6 +125,7 @@ impl Engine {
             return Err(EngineError::TxNotFound { client, tx });
         };
         match record {
+            TxRecord::Withdrawal => Err(EngineError::WithdrawalDispute { client, tx }),
             TxRecord::Deposit(deposit) => {
                 if deposit.client() != client {
                     return Err(EngineError::ClientMismatch { client, tx });
@@ -147,6 +163,7 @@ impl Engine {
             return Err(EngineError::TxNotFound { client, tx });
         };
         match record {
+            TxRecord::Withdrawal => Err(EngineError::WithdrawalDispute { client, tx }),
             TxRecord::Deposit(deposit) => {
                 if deposit.client() != client {
                     return Err(EngineError::ClientMismatch { client, tx });
@@ -172,6 +189,7 @@ impl Engine {
             return Err(EngineError::TxNotFound { client, tx });
         };
         match record {
+            TxRecord::Withdrawal => Err(EngineError::WithdrawalDispute { client, tx }),
             TxRecord::Deposit(deposit) => {
                 if deposit.client() != client {
                     return Err(EngineError::ClientMismatch { client, tx });
@@ -428,7 +446,9 @@ mod tests {
             .process(Transaction::Dispute { client: 1, tx: 1 })
             .unwrap();
 
-        let TxRecord::Deposit(record) = engine.txs.get(&1).unwrap();
+        let Some(TxRecord::Deposit(record)) = engine.txs.get(&1) else {
+            panic!("expected deposit record")
+        };
         assert_eq!(record.state(), DisputeState::Disputed);
     }
 
@@ -547,10 +567,6 @@ mod tests {
         assert_eq!(acct.held(), Decimal::ZERO);
     }
 
-    // TODO(task 06): once `TxRecord::Withdrawal` lands, add a test for
-    // dispute-on-withdrawal returning `EngineError::WithdrawalDispute`.
-    // Variant exists already so the engine API is stable.
-
     #[test]
     fn process_should_release_held_funds_when_resolve_targets_disputed_deposit() {
         let mut engine = Engine::new();
@@ -593,7 +609,9 @@ mod tests {
             .process(Transaction::Resolve { client: 1, tx: 1 })
             .unwrap();
 
-        let TxRecord::Deposit(record) = engine.txs.get(&1).unwrap();
+        let Some(TxRecord::Deposit(record)) = engine.txs.get(&1) else {
+            panic!("expected deposit record")
+        };
         assert_eq!(record.state(), DisputeState::NotDisputed);
     }
 
@@ -767,7 +785,9 @@ mod tests {
             .process(Transaction::Chargeback { client: 1, tx: 1 })
             .unwrap();
 
-        let TxRecord::Deposit(record) = engine.txs.get(&1).unwrap();
+        let Some(TxRecord::Deposit(record)) = engine.txs.get(&1) else {
+            panic!("expected deposit record")
+        };
         assert_eq!(record.state(), DisputeState::ChargedBack);
     }
 
@@ -1050,5 +1070,221 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(err, EngineError::ChargedBack { client: 1, tx: 1 }));
+    }
+
+    #[test]
+    fn process_should_return_withdrawal_dispute_when_dispute_targets_withdrawal() {
+        // Withdrawals are stored as marker records solely so collisions can be
+        // detected; per Q1 they are not disputable, and a dispute event
+        // referring to one surfaces `WithdrawalDispute`.
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+        engine
+            .process(Transaction::Withdrawal {
+                client: 1,
+                tx: 2,
+                amount: "1.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        let err = engine
+            .process(Transaction::Dispute { client: 1, tx: 2 })
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::WithdrawalDispute { client: 1, tx: 2 }
+        ));
+    }
+
+    #[test]
+    fn process_should_return_duplicate_tx_id_when_deposit_reuses_existing_deposit_id() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        let err = engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "5.0000".parse().unwrap(),
+            })
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::DuplicateTxId { client: 1, tx: 1 }
+        ));
+    }
+
+    #[test]
+    fn process_should_leave_balances_unchanged_when_deposit_reuses_existing_deposit_id() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        let _ = engine.process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "5.0000".parse().unwrap(),
+        });
+
+        assert_eq!(
+            engine.accounts.get(&1).unwrap().available(),
+            "10.0000".parse::<Decimal>().unwrap()
+        );
+    }
+
+    #[test]
+    fn process_should_return_duplicate_tx_id_when_withdrawal_reuses_existing_withdrawal_id() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+        engine
+            .process(Transaction::Withdrawal {
+                client: 1,
+                tx: 2,
+                amount: "1.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        let err = engine
+            .process(Transaction::Withdrawal {
+                client: 1,
+                tx: 2,
+                amount: "1.0000".parse().unwrap(),
+            })
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::DuplicateTxId { client: 1, tx: 2 }
+        ));
+    }
+
+    #[test]
+    fn process_should_return_duplicate_tx_id_when_withdrawal_reuses_existing_deposit_id() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        let err = engine
+            .process(Transaction::Withdrawal {
+                client: 1,
+                tx: 1,
+                amount: "1.0000".parse().unwrap(),
+            })
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::DuplicateTxId { client: 1, tx: 1 }
+        ));
+    }
+
+    #[test]
+    fn process_should_leave_balances_unchanged_when_withdrawal_reuses_existing_deposit_id() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        let _ = engine.process(Transaction::Withdrawal {
+            client: 1,
+            tx: 1,
+            amount: "1.0000".parse().unwrap(),
+        });
+
+        let acct = engine.accounts.get(&1).unwrap();
+        assert_eq!(acct.available(), "10.0000".parse::<Decimal>().unwrap());
+    }
+
+    #[test]
+    fn process_should_return_duplicate_tx_id_when_deposit_reuses_existing_withdrawal_id() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
+        engine
+            .process(Transaction::Withdrawal {
+                client: 1,
+                tx: 2,
+                amount: "1.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        let err = engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 2,
+                amount: "5.0000".parse().unwrap(),
+            })
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::DuplicateTxId { client: 1, tx: 2 }
+        ));
+    }
+
+    #[test]
+    fn process_should_record_withdrawal_tx_id_even_when_insufficient_funds_rejects() {
+        // Per 6a tx ids are globally unique; a withdrawal that fails for
+        // insufficient funds still consumes its tx id so a partner-error
+        // retry is flagged as `DuplicateTxId` rather than silently re-tried.
+        let mut engine = Engine::new();
+
+        let _ = engine.process(Transaction::Withdrawal {
+            client: 1,
+            tx: 1,
+            amount: "1.0000".parse().unwrap(),
+        });
+
+        let err = engine
+            .process(Transaction::Withdrawal {
+                client: 1,
+                tx: 1,
+                amount: "1.0000".parse().unwrap(),
+            })
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::DuplicateTxId { client: 1, tx: 1 }
+        ));
     }
 }

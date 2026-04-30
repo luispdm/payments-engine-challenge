@@ -2,9 +2,9 @@
 //!
 //! The engine retains a copy of every deposit so later dispute events can
 //! recover the original client and amount, cross-check them, and walk the
-//! dispute lifecycle. Withdrawals join the ledger as a marker variant in
-//! task 06 to enforce cross-type tx-id dedup; the variant is intentionally
-//! absent here so a missing arm forces that task to wire it up.
+//! dispute lifecycle. Withdrawals join the ledger as a payload-free marker
+//! variant: per Q1 they are not disputable, so no fields beyond the tx id
+//! itself are needed; their presence powers cross-type tx-id dedup (6a).
 
 use rust_decimal::Decimal;
 
@@ -142,12 +142,20 @@ pub enum DisputeRejection {
 #[derive(Debug, PartialEq, Eq)]
 pub struct NotDisputed;
 
-/// Tx ledger entry. Only `Deposit` exists at this stage; the `Withdrawal`
-/// marker variant lands in task 06 to power cross-type dedup.
+/// Tx ledger entry.
+///
+/// `Deposit` carries the full snapshot needed to walk the dispute lifecycle.
+/// `Withdrawal` is a payload-free marker: per Q1 a withdrawal is never
+/// disputable, so the engine only needs to know the tx id was seen so a
+/// later collision (6a) is detectable.
 #[derive(Debug, PartialEq, Eq)]
 pub enum TxRecord {
     /// Deposit row, retained so disputes can find it later.
     Deposit(DepositRecord),
+    /// Withdrawal row. Stored solely to surface tx-id collisions; the
+    /// engine never reads back any payload because withdrawals are not
+    /// disputable per Q1.
+    Withdrawal,
 }
 
 #[cfg(test)]
