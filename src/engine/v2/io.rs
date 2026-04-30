@@ -1,14 +1,13 @@
-//! v1's CSV entry point. Delegates to the shared driver in
-//! [`super::super::io`] so the v1 and v2 engines stay byte-for-byte
-//! compatible on identical inputs (per the engine-swap decision in
-//! `~/payments-engine-challenge-docs/decisions.md`).
+//! v2's CSV entry point. Mirrors [`super::super::v1::io::run`] so both
+//! variants share one driver and one writer (defined in
+//! [`super::super::io`]) with only the engine constructor differing.
 
 use std::io::{Read, Write};
 
 use super::super::io::{drive_input, write_snapshots};
 use super::Engine;
 
-/// Read transactions from `input`, drive the v1 engine, then write the
+/// Read transactions from `input`, drive the v2 engine, then write the
 /// resulting account snapshots to `output`.
 ///
 /// # Errors
