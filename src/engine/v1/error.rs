@@ -45,8 +45,8 @@ pub enum EngineError {
         tx: u32,
     },
 
-    /// Dispute event references a withdrawal; per Q1 only deposits are
-    /// disputable. Unreachable until task 06 stores withdrawal markers.
+    /// Dispute / resolve / chargeback event references a withdrawal; per Q1
+    /// withdrawals are not disputable.
     #[error("transaction {tx} for client {client}: withdrawals are not disputable")]
     WithdrawalDispute {
         /// Client id from the offending row.
@@ -100,6 +100,18 @@ pub enum EngineError {
     /// opened before the lock continue to process.
     #[error("transaction {tx} for client {client}: account is locked")]
     AccountLocked {
+        /// Client id from the offending row.
+        client: u16,
+        /// Referenced tx id.
+        tx: u32,
+    },
+
+    /// Deposit or withdrawal row reused a tx id that has already been seen.
+    /// Per 6a tx ids are deduped across types: a deposit and a withdrawal
+    /// sharing an id collide just as two deposits do. The second event is
+    /// rejected and never touches account state.
+    #[error("transaction {tx} for client {client}: duplicate tx id")]
+    DuplicateTxId {
         /// Client id from the offending row.
         client: u16,
         /// Referenced tx id.

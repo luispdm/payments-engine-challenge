@@ -155,6 +155,58 @@ chargeback,1,1,
 }
 
 #[test]
+fn malformed_row_in_middle_should_skip_and_continue_in_snapshot() {
+    // Row 2 has an unparseable amount; the csv layer rejects it. Per task 06
+    // the driver loop downgrades that to `log::warn!` and the pipeline
+    // continues, so the snapshot reflects rows 1 and 3 only.
+    let input = "\
+type,client,tx,amount
+deposit,1,1,10.0000
+deposit,1,2,not_a_number
+deposit,1,3,2.5000
+";
+
+    insta::assert_snapshot!("malformed_row_skipped_continues", run_and_normalise(input));
+}
+
+#[test]
+fn duplicate_tx_ids_should_apply_only_first_event_in_snapshot() {
+    // Per 6a the second event reusing tx 1 is rejected. The cross-type
+    // collision on tx 2 (deposit then withdrawal with the same id) leaves
+    // the deposit's funds untouched.
+    let input = "\
+type,client,tx,amount
+deposit,1,1,10.0000
+deposit,1,1,99.0000
+deposit,1,2,5.0000
+withdrawal,1,2,3.0000
+";
+
+    insta::assert_snapshot!("duplicate_tx_ids_first_wins", run_and_normalise(input));
+}
+
+#[test]
+fn mixed_ignorable_events_should_complete_without_crashing_in_snapshot() {
+    // Drives all of TxNotFound (dispute on tx 99), DuplicateTxId (deposit
+    // tx 1 twice), AccountLocked (deposit on the locked account), and
+    // NotDisputed (resolve on a tx never disputed) through one CSV; the
+    // pipeline never crashes and the snapshot captures the survivors.
+    let input = "\
+type,client,tx,amount
+deposit,1,1,10.0000
+deposit,1,1,5.0000
+dispute,1,99,
+deposit,2,2,4.0000
+resolve,2,2,
+dispute,1,1,
+chargeback,1,1,
+deposit,1,3,1.0000
+";
+
+    insta::assert_snapshot!("mixed_ignorable_events", run_and_normalise(input));
+}
+
+#[test]
 fn prior_dispute_resolve_should_still_succeed_after_lock_in_snapshot() {
     // Per Q2, a resolve on a tx already in `Disputed` state is allowed even
     // after a different dispute's chargeback locked the account. Client 1

@@ -3,8 +3,17 @@
 //! Reading streams rows lazily (no full buffering of input) so the engine
 //! can in principle consume arbitrarily large inputs. Writing emits
 //! amounts at exactly 4 decimal places per decision Q6b.
+//!
+//! Partner-error handling per task 06: per-row CSV deserialize failures
+//! (unparseable amount, type-mismatched fields, …) and engine errors that
+//! the spec instructs us to ignore are downgraded to `log::warn!` and the
+//! pipeline continues. IO failures at the underlying reader propagate via
+//! `anyhow::Context` because they are not row-local; recovery is the
+//! caller's job.
 
 use std::io::{Read, Write};
+
+use anyhow::Context;
 
 use super::Engine;
 use super::transaction::{RawTransaction, Transaction};
@@ -12,14 +21,15 @@ use super::transaction::{RawTransaction, Transaction};
 /// Read transactions from `input`, drive `engine`, then write the
 /// resulting account snapshots to `output`.
 ///
-/// Partner errors (unknown row type, missing amount, future engine
-/// validation failures) are silently skipped at this stage; task 06
-/// upgrades them to `log::warn!` once the logging facade is wired up.
+/// Per-row partner errors (unknown row type, missing amount, malformed
+/// fields, engine validations) emit `log::warn!` and the pipeline
+/// advances. Structural failures at the IO or CSV-framework level
+/// propagate through `anyhow`.
 ///
 /// # Errors
 ///
-/// Propagates structural IO and CSV parse errors from the underlying
-/// readers and writers.
+/// Propagates structural IO failures from the underlying readers and
+/// writers.
 pub fn run<R: Read, W: Write>(input: R, output: W) -> anyhow::Result<()> {
     let mut engine = Engine::new();
     read_into(&mut engine, input)?;
@@ -33,11 +43,30 @@ fn read_into<R: Read>(engine: &mut Engine, input: R) -> anyhow::Result<()> {
         .from_reader(input);
 
     for result in rdr.deserialize::<RawTransaction>() {
-        let raw = result?;
-        let Ok(tx) = Transaction::try_from(raw) else {
-            continue;
+        let raw = match result {
+            Ok(raw) => raw,
+            Err(err) => {
+                // IO errors below the csv layer are terminal: the input
+                // reader itself is gone and we have nothing left to drain.
+                // Per-row deserialize / framing errors are local to the bad
+                // row and the loop carries on.
+                if matches!(err.kind(), csv::ErrorKind::Io(_)) {
+                    return Err(err).context("read CSV row");
+                }
+                log::warn!("skipping malformed CSV row: {err}");
+                continue;
+            }
         };
-        let _ = engine.process(tx);
+        let tx = match Transaction::try_from(raw) {
+            Ok(tx) => tx,
+            Err(err) => {
+                log::warn!("skipping unprocessable row: {err}");
+                continue;
+            }
+        };
+        if let Err(err) = engine.process(tx) {
+            log::warn!("ignoring transaction: {err}");
+        }
     }
     Ok(())
 }
