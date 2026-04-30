@@ -75,8 +75,8 @@ pub enum EngineError {
         tx: u32,
     },
 
-    /// Dispute event references a tx whose stored client_id differs from
-    /// the row's client_id. Treated as a partner error.
+    /// Dispute / resolve / chargeback event references a tx whose stored
+    /// client_id differs from the row's client_id. Treated as a partner error.
     #[error("transaction {tx}: client {client} does not match the recorded client")]
     ClientMismatch {
         /// Client id from the offending row.
