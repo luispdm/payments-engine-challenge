@@ -68,7 +68,7 @@ impl Engine {
     pub fn process(&mut self, tx: Transaction) -> Result<(), EngineError> {
         match tx {
             Transaction::Deposit { client, tx, amount } => {
-                if self.is_locked(client) {
+                if Self::account_locked(&self.accounts, client) {
                     return Err(EngineError::AccountLocked { client, tx });
                 }
                 self.accounts
@@ -82,7 +82,7 @@ impl Engine {
                 Ok(())
             }
             Transaction::Withdrawal { client, tx, amount } => {
-                if self.is_locked(client) {
+                if Self::account_locked(&self.accounts, client) {
                     return Err(EngineError::AccountLocked { client, tx });
                 }
                 self.accounts
@@ -98,9 +98,11 @@ impl Engine {
     }
 
     /// True when `client` has an account that a prior chargeback locked.
-    /// Unseen clients are unlocked by definition.
-    fn is_locked(&self, client: u16) -> bool {
-        self.accounts.get(&client).is_some_and(Account::locked)
+    /// Unseen clients are unlocked by definition. Takes the `accounts` map by
+    /// reference (rather than `&self`) so call sites holding `&mut self.txs`
+    /// can split-borrow without conflicting on the whole `Engine`.
+    fn account_locked(accounts: &HashMap<u16, Account>, client: u16) -> bool {
+        accounts.get(&client).is_some_and(Account::locked)
     }
 
     fn apply_dispute(&mut self, client: u16, tx: u32) -> Result<(), EngineError> {
@@ -117,7 +119,7 @@ impl Engine {
                 // ChargedBack states fall through to their own state-level
                 // errors below, which the driver loop logs the same way.
                 if deposit.state() == DisputeState::NotDisputed
-                    && self.accounts.get(&client).is_some_and(Account::locked)
+                    && Self::account_locked(&self.accounts, client)
                 {
                     return Err(EngineError::AccountLocked { client, tx });
                 }
