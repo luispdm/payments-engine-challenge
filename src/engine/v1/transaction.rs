@@ -26,7 +26,7 @@ pub enum Transaction {
         /// Funds being credited (4 decimal places per spec).
         amount: Decimal,
     },
-    /// Debit `amount` from client's `available` and `total`. No-op until task 02.
+    /// Debit `amount` from client's `available` and `total`.
     Withdrawal {
         /// Client id.
         client: u16,

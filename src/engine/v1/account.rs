@@ -62,7 +62,30 @@ impl Account {
     pub fn apply_deposit(&mut self, amount: Decimal) {
         self.available += amount;
     }
+
+    /// Debit `amount` from `available`. `held` is unchanged, so `total`
+    /// (derived) decreases by `amount`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InsufficientFunds`] when `amount > available`. Balances are
+    /// left untouched in that case so the caller can ignore or log per the
+    /// spec's silent-rejection rule.
+    pub fn apply_withdrawal(&mut self, amount: Decimal) -> Result<(), InsufficientFunds> {
+        if amount > self.available {
+            return Err(InsufficientFunds);
+        }
+        self.available -= amount;
+        Ok(())
+    }
 }
+
+/// Returned by [`Account::apply_withdrawal`] when the requested debit would
+/// drive `available` below zero. Carries no payload: the engine reattaches
+/// the offending `client`/`tx`/`amount` when promoting it to
+/// [`super::error::EngineError::InsufficientFunds`].
+#[derive(Debug, PartialEq, Eq)]
+pub struct InsufficientFunds;
 
 #[cfg(test)]
 mod tests {
@@ -107,5 +130,64 @@ mod tests {
         }
 
         assert_eq!(acct.available(), "1.0000".parse::<Decimal>().unwrap());
+    }
+
+    #[test]
+    fn apply_withdrawal_should_debit_available_and_leave_held_when_funds_sufficient() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("10.0000".parse().unwrap());
+
+        acct.apply_withdrawal("3.5000".parse().unwrap()).unwrap();
+
+        assert_eq!(
+            acct,
+            Account {
+                client: 1,
+                available: "6.5000".parse().unwrap(),
+                held: Decimal::ZERO,
+                locked: false,
+            },
+        );
+    }
+
+    #[test]
+    fn apply_withdrawal_should_return_err_when_amount_exceeds_available() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("1.0000".parse().unwrap());
+
+        let err = acct
+            .apply_withdrawal("1.0001".parse().unwrap())
+            .unwrap_err();
+
+        assert_eq!(err, InsufficientFunds);
+    }
+
+    #[test]
+    fn apply_withdrawal_should_leave_balances_unchanged_when_amount_exceeds_available() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("1.0000".parse().unwrap());
+
+        acct.apply_withdrawal("1.0001".parse().unwrap())
+            .unwrap_err();
+
+        assert_eq!(
+            acct,
+            Account {
+                client: 1,
+                available: "1.0000".parse().unwrap(),
+                held: Decimal::ZERO,
+                locked: false,
+            },
+        );
+    }
+
+    #[test]
+    fn apply_withdrawal_should_succeed_when_amount_equals_available() {
+        let mut acct = Account::new(1);
+        acct.apply_deposit("2.5000".parse().unwrap());
+
+        acct.apply_withdrawal("2.5000".parse().unwrap()).unwrap();
+
+        assert_eq!(acct.available(), Decimal::ZERO);
     }
 }
