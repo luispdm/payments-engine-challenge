@@ -5,6 +5,8 @@
 //! the spec's "ignore on partner error" rule. Variants are added incrementally
 //! as later tasks introduce more failure modes.
 
+use rust_decimal::Decimal;
+
 /// Errors produced while parsing input rows or processing transactions.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -20,5 +22,16 @@ pub enum EngineError {
     MissingAmount {
         /// Tx id of the offending row.
         tx: u32,
+    },
+
+    /// Withdrawal would drive `available` below zero. Balances unchanged.
+    #[error("transaction {tx} for client {client}: insufficient funds for withdrawal of {amount}")]
+    InsufficientFunds {
+        /// Client id.
+        client: u16,
+        /// Tx id of the rejected withdrawal.
+        tx: u32,
+        /// Amount the client tried to withdraw.
+        amount: Decimal,
     },
 }

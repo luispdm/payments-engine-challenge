@@ -61,3 +61,23 @@ deposit,1,3,2.0000
 
     insta::assert_snapshot!("unknown_row_skipped", run_and_normalise(input));
 }
+
+#[test]
+fn deposits_and_withdrawals_should_settle_to_expected_balances() {
+    // Client 1: 10 deposited, 3.5 withdrawn, ends at 6.5.
+    // Client 2: 4 deposited, attempted 9 withdrawal rejected (insufficient
+    // funds), then 1.25 withdrawn, ends at 2.75.
+    // Client 3: only a withdrawal attempt; account auto-created at zero,
+    // withdrawal rejected, balances stay zero.
+    let input = "\
+type,client,tx,amount
+deposit,1,1,10.0000
+deposit,2,2,4.0000
+withdrawal,1,3,3.5000
+withdrawal,2,4,9.0000
+withdrawal,3,5,1.0000
+withdrawal,2,6,1.2500
+";
+
+    insta::assert_snapshot!("deposits_and_withdrawals", run_and_normalise(input));
+}

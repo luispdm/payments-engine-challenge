@@ -30,14 +30,15 @@ impl Engine {
 
     /// Apply `tx` to the engine state.
     ///
-    /// Task 01 only acts on [`Transaction::Deposit`]; the other variants
-    /// parse cleanly but no-op until later tasks wire them up.
+    /// Tasks 01-02 act on [`Transaction::Deposit`] and
+    /// [`Transaction::Withdrawal`]; the dispute lifecycle variants parse
+    /// cleanly but no-op until later tasks wire them up.
     ///
     /// # Errors
     ///
-    /// Currently infallible; returns a `Result` so the signature is stable
-    /// as later tasks add error variants (insufficient funds, unknown tx,
-    /// account locked, …).
+    /// - [`EngineError::InsufficientFunds`] when a withdrawal would drive
+    ///   `available` below zero. Per spec the driver swallows this; the
+    ///   variant is surfaced so logging can attach later.
     pub fn process(&mut self, tx: Transaction) -> Result<(), EngineError> {
         match tx {
             Transaction::Deposit { client, amount, .. } => {
@@ -47,8 +48,13 @@ impl Engine {
                     .apply_deposit(amount);
                 Ok(())
             }
-            Transaction::Withdrawal { .. }
-            | Transaction::Dispute { .. }
+            Transaction::Withdrawal { client, tx, amount } => self
+                .accounts
+                .entry(client)
+                .or_insert_with(|| Account::new(client))
+                .apply_withdrawal(amount)
+                .map_err(|_| EngineError::InsufficientFunds { client, tx, amount }),
+            Transaction::Dispute { .. }
             | Transaction::Resolve { .. }
             | Transaction::Chargeback { .. } => Ok(()),
         }
@@ -123,18 +129,133 @@ mod tests {
     }
 
     #[test]
-    fn process_should_noop_when_withdrawal() {
+    fn process_should_apply_withdrawal_to_target_client_account() {
         let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "10.0000".parse().unwrap(),
+            })
+            .unwrap();
 
         engine
             .process(Transaction::Withdrawal {
+                client: 1,
+                tx: 2,
+                amount: "4.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            engine.accounts.get(&1).unwrap().available(),
+            "6.0000".parse::<Decimal>().unwrap()
+        );
+    }
+
+    #[test]
+    fn process_should_return_insufficient_funds_when_withdrawal_exceeds_available() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
                 client: 1,
                 tx: 1,
                 amount: "1.0000".parse().unwrap(),
             })
             .unwrap();
 
-        assert!(engine.accounts.is_empty());
+        let err = engine
+            .process(Transaction::Withdrawal {
+                client: 1,
+                tx: 2,
+                amount: "5.0000".parse().unwrap(),
+            })
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::InsufficientFunds {
+                client: 1,
+                tx: 2,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn process_should_leave_balances_unchanged_when_withdrawal_rejected() {
+        let mut engine = Engine::new();
+        engine
+            .process(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "1.0000".parse().unwrap(),
+            })
+            .unwrap();
+
+        let _ = engine.process(Transaction::Withdrawal {
+            client: 1,
+            tx: 2,
+            amount: "5.0000".parse().unwrap(),
+        });
+
+        assert_eq!(
+            engine.accounts.get(&1).unwrap().available(),
+            "1.0000".parse::<Decimal>().unwrap()
+        );
+    }
+
+    #[test]
+    fn process_should_auto_create_account_at_zero_when_withdrawal_for_unseen_client() {
+        let mut engine = Engine::new();
+
+        let err = engine
+            .process(Transaction::Withdrawal {
+                client: 7,
+                tx: 1,
+                amount: "1.0000".parse().unwrap(),
+            })
+            .unwrap_err();
+
+        assert!(matches!(err, EngineError::InsufficientFunds { .. }));
+        let acct = engine.accounts.get(&7).expect("account auto-created");
+        assert_eq!(acct.available(), Decimal::ZERO);
+    }
+
+    #[test]
+    fn process_should_settle_to_correct_balance_for_mixed_deposit_withdrawal_sequence() {
+        let mut engine = Engine::new();
+        let txs = [
+            Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: "5.0000".parse().unwrap(),
+            },
+            Transaction::Withdrawal {
+                client: 1,
+                tx: 2,
+                amount: "1.5000".parse().unwrap(),
+            },
+            Transaction::Deposit {
+                client: 1,
+                tx: 3,
+                amount: "2.0000".parse().unwrap(),
+            },
+            Transaction::Withdrawal {
+                client: 1,
+                tx: 4,
+                amount: "0.2500".parse().unwrap(),
+            },
+        ];
+
+        for tx in txs {
+            engine.process(tx).unwrap();
+        }
+
+        assert_eq!(
+            engine.accounts.get(&1).unwrap().available(),
+            "5.2500".parse::<Decimal>().unwrap()
+        );
     }
 
     #[test]
