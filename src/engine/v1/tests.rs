@@ -970,6 +970,36 @@ fn process_should_return_duplicate_tx_id_when_withdrawal_reuses_existing_withdra
 }
 
 #[test]
+fn process_should_leave_balances_unchanged_when_withdrawal_reuses_existing_withdrawal_id() {
+    let mut engine = Engine::new();
+    engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "10.0000".parse().unwrap(),
+        })
+        .unwrap();
+    engine
+        .process(Transaction::Withdrawal {
+            client: 1,
+            tx: 2,
+            amount: "1.0000".parse().unwrap(),
+        })
+        .unwrap();
+
+    let _ = engine.process(Transaction::Withdrawal {
+        client: 1,
+        tx: 2,
+        amount: "1.0000".parse().unwrap(),
+    });
+
+    assert_eq!(
+        engine.accounts.get(&1).unwrap().available(),
+        "9.0000".parse::<Decimal>().unwrap()
+    );
+}
+
+#[test]
 fn process_should_return_duplicate_tx_id_when_withdrawal_reuses_existing_deposit_id() {
     let mut engine = Engine::new();
     engine
@@ -1045,6 +1075,36 @@ fn process_should_return_duplicate_tx_id_when_deposit_reuses_existing_withdrawal
         err,
         EngineError::DuplicateTxId { client: 1, tx: 2 }
     ));
+}
+
+#[test]
+fn process_should_leave_balances_unchanged_when_deposit_reuses_existing_withdrawal_id() {
+    let mut engine = Engine::new();
+    engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "10.0000".parse().unwrap(),
+        })
+        .unwrap();
+    engine
+        .process(Transaction::Withdrawal {
+            client: 1,
+            tx: 2,
+            amount: "1.0000".parse().unwrap(),
+        })
+        .unwrap();
+
+    let _ = engine.process(Transaction::Deposit {
+        client: 1,
+        tx: 2,
+        amount: "5.0000".parse().unwrap(),
+    });
+
+    assert_eq!(
+        engine.accounts.get(&1).unwrap().available(),
+        "9.0000".parse::<Decimal>().unwrap()
+    );
 }
 
 #[test]
