@@ -123,8 +123,6 @@ non-negative tx-id reservation) still hold.
 
 ## Throughput
 
-Numbers below were captured on the development machine.
-
 ### 1M-tx mean ± stddev (ms) and throughput (Mtx/s) across overlap ratios
 
 | Variant | ov0% (ms) | ov0% (Mtx/s) | ov25% (ms) | ov25% (Mtx/s) | ov50% (ms) | ov50% (Mtx/s) | ov100% (ms) | ov100% (Mtx/s) |
@@ -289,7 +287,7 @@ the bounded channel behind the others.
 
 ### Recommendation
 
-For the workload assumed here (case B, many concurrent streams across
+For the workload assumed here (many concurrent streams across
 overlapping clients, sync engine consumer), **DashMap is the swap
 worth landing** *for batches large enough to amortize producer-thread
 spawn cost* (≥ 10k tx). Roughly 2.7x throughput over the
