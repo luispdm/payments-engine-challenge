@@ -4,12 +4,6 @@ use std::io::{Read, Write};
 
 pub mod engine;
 
-#[cfg(feature = "bench")]
-pub mod bench_support;
-
-#[cfg(feature = "bench")]
-pub mod mem;
-
 /// Process a CSV input stream and emit the per-client account snapshot to `output`.
 ///
 /// Delegates to [`engine::io::run`].
