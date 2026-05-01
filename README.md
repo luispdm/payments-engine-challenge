@@ -71,6 +71,19 @@ For further details, check:
 - [Data structure bench code](https://github.com/luispdm/payments-engine-challenge/pull/8)
 - [Concurrency bench code](https://github.com/luispdm/payments-engine-challenge/pull/9)
 
+## Testing
+
+## Unit tests
+
+Unit tests live together with their source code. The only exception
+being `src/engine/tests.rs`, that includes an extensive suite for `src/engine.rs`.
+
+### Integration tests
+
+They run via [insta](https://insta.rs/) to enable snapshot testing. The first run
+generates the snapshots (`tests/snapshots`) that can be used during further development
+phases to catch regressions.
+
 ## Known limitations
 
 - **Single-threaded engine on `main`.** In production, a sharded app on
