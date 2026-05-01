@@ -1,0 +1,4 @@
+type,client,tx,amount
+deposit,1,1,10.0000
+deposit,1,2,not_a_number
+deposit,1,3,2.5000

@@ -73,13 +73,14 @@ impl TryFrom<RawTransaction> for Transaction {
 
     fn try_from(raw: RawTransaction) -> Result<Self, Self::Error> {
         let RawTransaction {
-            kind,
+            mut kind,
             client,
             tx,
             amount,
         } = raw;
+        kind.make_ascii_lowercase();
 
-        match kind.to_ascii_lowercase().as_str() {
+        match kind.as_str() {
             "deposit" => {
                 let amount = amount.ok_or(EngineError::MissingAmount { tx })?;
                 Ok(Transaction::Deposit { client, tx, amount })

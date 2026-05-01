@@ -30,36 +30,21 @@ fn run_and_normalise(input: &str) -> String {
 
 #[test]
 fn deposits_only_should_emit_correct_balances_per_client() {
-    let input = "\
-type,client,tx,amount
-deposit,1,1,1.0000
-deposit,2,2,2.0000
-deposit,1,3,2.0000
-deposit,3,4,0.5000
-deposit,2,5,0.1234
-";
+    let input = include_str!("samples/deposits_only.csv");
 
     insta::assert_snapshot!("deposits_only", run_and_normalise(input));
 }
 
 #[test]
 fn deposit_with_one_decimal_should_render_as_four_decimal_places() {
-    let input = "\
-type,client,tx,amount
-deposit,1,1,1.5
-";
+    let input = include_str!("samples/deposit_one_decimal_renders_four.csv");
 
     insta::assert_snapshot!("deposit_one_decimal_renders_four", run_and_normalise(input));
 }
 
 #[test]
 fn unknown_row_type_should_be_skipped_without_failing_the_pipeline() {
-    let input = "\
-type,client,tx,amount
-deposit,1,1,1.0000
-transfer,1,2,5.0000
-deposit,1,3,2.0000
-";
+    let input = include_str!("samples/unknown_row_skipped.csv");
 
     insta::assert_snapshot!("unknown_row_skipped", run_and_normalise(input));
 }
@@ -68,12 +53,7 @@ deposit,1,3,2.0000
 fn deposit_then_dispute_should_hold_funds_in_snapshot() {
     // Client 1: deposits 10, then disputes that deposit. Funds move from
     // available to held; total stays at 10. Client 2: undisputed deposit.
-    let input = "\
-type,client,tx,amount
-deposit,1,1,10.0000
-deposit,2,2,5.0000
-dispute,1,1,
-";
+    let input = include_str!("samples/deposit_then_dispute.csv");
 
     insta::assert_snapshot!("deposit_then_dispute", run_and_normalise(input));
 }
@@ -82,12 +62,7 @@ dispute,1,1,
 fn deposit_dispute_resolve_should_release_held_funds_in_snapshot() {
     // Client 1: deposits 10, disputes that deposit, resolves it. Funds move
     // from held back to available; snapshot matches the pre-dispute state.
-    let input = "\
-type,client,tx,amount
-deposit,1,1,10.0000
-dispute,1,1,
-resolve,1,1,
-";
+    let input = include_str!("samples/deposit_dispute_resolve.csv");
 
     insta::assert_snapshot!("deposit_dispute_resolve", run_and_normalise(input));
 }
@@ -96,13 +71,7 @@ resolve,1,1,
 fn redispute_after_resolve_should_hold_funds_again_in_snapshot() {
     // A deposit may be re-disputed after resolve. End state has 10.0
     // held and 0 available, identical to a single-dispute run.
-    let input = "\
-type,client,tx,amount
-deposit,1,1,10.0000
-dispute,1,1,
-resolve,1,1,
-dispute,1,1,
-";
+    let input = include_str!("samples/redispute_after_resolve.csv");
 
     insta::assert_snapshot!("redispute_after_resolve", run_and_normalise(input));
 }
@@ -114,15 +83,7 @@ fn deposits_and_withdrawals_should_settle_to_expected_balances() {
     // funds), then 1.25 withdrawn, ends at 2.75.
     // Client 3: only a withdrawal attempt; account auto-created at zero,
     // withdrawal rejected, balances stay zero.
-    let input = "\
-type,client,tx,amount
-deposit,1,1,10.0000
-deposit,2,2,4.0000
-withdrawal,1,3,3.5000
-withdrawal,2,4,9.0000
-withdrawal,3,5,1.0000
-withdrawal,2,6,1.2500
-";
+    let input = include_str!("samples/deposits_and_withdrawals.csv");
 
     insta::assert_snapshot!("deposits_and_withdrawals", run_and_normalise(input));
 }
@@ -131,12 +92,7 @@ withdrawal,2,6,1.2500
 fn deposit_dispute_chargeback_should_lock_account_in_snapshot() {
     // Client 1: deposits 10, disputes that deposit, chargeback reverses it.
     // Held returns to 0, available stays 0, total drops to 0, account locked.
-    let input = "\
-type,client,tx,amount
-deposit,1,1,10.0000
-dispute,1,1,
-chargeback,1,1,
-";
+    let input = include_str!("samples/deposit_dispute_chargeback.csv");
 
     insta::assert_snapshot!("deposit_dispute_chargeback", run_and_normalise(input));
 }
@@ -145,13 +101,7 @@ chargeback,1,1,
 fn fraud_sequence_should_drive_balance_negative_in_snapshot() {
     // A deposit that gets withdrawn before being charged back drives
     // total below zero, modelling the platform's exposure post-fraud.
-    let input = "\
-type,client,tx,amount
-deposit,1,1,100.0000
-withdrawal,1,2,80.0000
-dispute,1,1,
-chargeback,1,1,
-";
+    let input = include_str!("samples/fraud_sequence_negative_balance.csv");
 
     insta::assert_snapshot!("fraud_sequence_negative_balance", run_and_normalise(input));
 }
@@ -161,12 +111,7 @@ fn malformed_row_in_middle_should_skip_and_continue_in_snapshot() {
     // Row 2 has an unparseable amount; the csv layer rejects it.
     // The driver loop downgrades that to `log::warn!` and the pipeline
     // continues, so the snapshot reflects rows 1 and 3 only.
-    let input = "\
-type,client,tx,amount
-deposit,1,1,10.0000
-deposit,1,2,not_a_number
-deposit,1,3,2.5000
-";
+    let input = include_str!("samples/malformed_row_skipped_continues.csv");
 
     insta::assert_snapshot!("malformed_row_skipped_continues", run_and_normalise(input));
 }
@@ -176,13 +121,7 @@ fn duplicate_tx_ids_should_apply_only_first_event_in_snapshot() {
     // The second event reusing tx 1 is rejected. The cross-type
     // collision on tx 2 (deposit then withdrawal with the same id) leaves
     // the deposit's funds untouched.
-    let input = "\
-type,client,tx,amount
-deposit,1,1,10.0000
-deposit,1,1,99.0000
-deposit,1,2,5.0000
-withdrawal,1,2,3.0000
-";
+    let input = include_str!("samples/duplicate_tx_ids_first_wins.csv");
 
     insta::assert_snapshot!("duplicate_tx_ids_first_wins", run_and_normalise(input));
 }
@@ -193,17 +132,7 @@ fn mixed_ignorable_events_should_complete_without_crashing_in_snapshot() {
     // tx 1 twice), AccountLocked (deposit on the locked account), and
     // NotDisputed (resolve on a tx never disputed) through one CSV; the
     // pipeline never crashes and the snapshot captures the survivors.
-    let input = "\
-type,client,tx,amount
-deposit,1,1,10.0000
-deposit,1,1,5.0000
-dispute,1,99,
-deposit,2,2,4.0000
-resolve,2,2,
-dispute,1,1,
-chargeback,1,1,
-deposit,1,3,1.0000
-";
+    let input = include_str!("samples/mixed_ignorable_events.csv");
 
     insta::assert_snapshot!("mixed_ignorable_events", run_and_normalise(input));
 }
@@ -215,13 +144,7 @@ fn non_positive_amounts_should_be_rejected_without_consuming_tx_ids_in_snapshot(
     // withdrawal credits the account by debiting a negative. Both rejected
     // up-front without consuming the tx id, so a corrected retry on the
     // same id (here tx 2 redeposited as +4) still applies.
-    let input = "\
-type,client,tx,amount
-deposit,1,1,10.0000
-deposit,1,2,-5.0000
-withdrawal,1,3,-3.0000
-deposit,1,2,4.0000
-";
+    let input = include_str!("samples/non_positive_amounts_rejected.csv");
 
     insta::assert_snapshot!("non_positive_amounts_rejected", run_and_normalise(input));
 }
@@ -232,15 +155,7 @@ fn prior_dispute_resolve_should_still_succeed_after_lock_in_snapshot() {
     // after a different dispute's chargeback locked the account. Client 1
     // has tx 1 (charged back, locks account) and tx 2 (disputed before lock,
     // resolved after).
-    let input = "\
-type,client,tx,amount
-deposit,1,1,10.0000
-deposit,1,2,5.0000
-dispute,1,1,
-dispute,1,2,
-chargeback,1,1,
-resolve,1,2,
-";
+    let input = include_str!("samples/prior_dispute_resolve_after_lock.csv");
 
     insta::assert_snapshot!("prior_dispute_resolve_after_lock", run_and_normalise(input));
 }
