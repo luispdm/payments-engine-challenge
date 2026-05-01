@@ -25,10 +25,10 @@ use transaction::Transaction;
 
 /// Split-ledger payments engine.
 ///
-/// `seen_txs` carries every tx id seen (deposit and withdrawal alike per
-/// 6a). `deposits` carries the records the dispute paths walk; a hit in
+/// `seen_txs` carries every tx id seen (deposit and withdrawal).
+/// `deposits` carries the records the dispute paths walk; a hit in
 /// `seen_txs` without a matching entry in `deposits` is by construction a
-/// withdrawal id, which is not disputable per Q1.
+/// withdrawal id, which is not disputable.
 #[derive(Debug, Default)]
 pub struct Engine {
     accounts: HashMap<u16, Account>,
@@ -44,11 +44,11 @@ impl Engine {
 
     /// Apply `tx` to the engine state.
     ///
-    /// All five transaction kinds are wired in. Lock semantics (Q2): once an
+    /// All five transaction kinds are wired in. Lock semantics: once an
     /// account has been frozen by a chargeback, subsequent deposits,
     /// withdrawals, and *new* disputes are rejected. Resolves and chargebacks
     /// targeting txs already in `Disputed` state still process so disputes
-    /// opened before the freeze can settle. Per 6a the engine also dedups
+    /// opened before the freeze can settle. The engine also dedups
     /// every deposit / withdrawal tx id across types: a second event reusing
     /// an existing id is rejected without touching account state.
     ///
@@ -65,7 +65,7 @@ impl Engine {
     /// - [`EngineError::TxNotFound`] when a dispute / resolve / chargeback
     ///   references an unknown tx id.
     /// - [`EngineError::WithdrawalDispute`] when a dispute / resolve /
-    ///   chargeback references a withdrawal (per Q1 not disputable).
+    ///   chargeback references a withdrawal (not disputable).
     /// - [`EngineError::AlreadyDisputed`] when a dispute fires against a tx
     ///   already in `Disputed` state (idempotent re-dispute, per Q5).
     /// - [`EngineError::ChargedBack`] when a dispute fires against a tx in
@@ -114,7 +114,7 @@ impl Engine {
                     return Err(EngineError::DuplicateTxId { client, tx });
                 }
                 // Reserve the tx id (in `seen_txs` only — withdrawals are
-                // not disputable per Q1, so they never enter `deposits`)
+                // not disputable, so they never enter `deposits`)
                 // before attempting the debit; an insufficient-funds
                 // rejection still consumes the id, matching the "globally
                 // unique tx ids" rule from 6a.

@@ -3,7 +3,7 @@
 //! The engine retains a copy of every deposit so later dispute events can
 //! recover the original client and amount, cross-check them, and walk the
 //! dispute lifecycle. Withdrawals are tracked solely in the engine's
-//! `seen_txs` set: per Q1 they are not disputable, so no fields beyond the
+//! `seen_txs` set: they are not disputable, so no fields beyond the
 //! tx id itself are needed; presence in the set powers cross-type tx-id
 //! dedup (6a).
 

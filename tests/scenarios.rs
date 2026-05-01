@@ -158,8 +158,8 @@ chargeback,1,1,
 
 #[test]
 fn malformed_row_in_middle_should_skip_and_continue_in_snapshot() {
-    // Row 2 has an unparseable amount; the csv layer rejects it. Per task 06
-    // the driver loop downgrades that to `log::warn!` and the pipeline
+    // Row 2 has an unparseable amount; the csv layer rejects it.
+    // The driver loop downgrades that to `log::warn!` and the pipeline
     // continues, so the snapshot reflects rows 1 and 3 only.
     let input = "\
 type,client,tx,amount

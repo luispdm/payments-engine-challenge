@@ -1,4 +1,4 @@
-//! Payments engine library entry point.
+//! Payments engine library entrypoint.
 
 use std::io::{Read, Write};
 
@@ -11,7 +11,7 @@ pub mod engine;
 /// # Errors
 ///
 /// Returns an error if the CSV input or output streams fail at the IO or
-/// parse layer; partner errors in individual rows are silently skipped.
+/// parse layer. Errors in individual rows are silently skipped.
 pub fn run<R: Read, W: Write>(input: R, output: W) -> anyhow::Result<()> {
     engine::io::run(input, output)
 }

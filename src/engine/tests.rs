@@ -742,7 +742,7 @@ fn process_should_return_withdrawal_dispute_when_chargeback_targets_withdrawal()
 
 #[test]
 fn process_should_return_withdrawal_dispute_when_dispute_targets_failed_withdrawal_id() {
-    // Per task 06 a withdrawal that fails for `InsufficientFunds` still
+    // A withdrawal that fails for `InsufficientFunds` still
     // consumes its tx id (recorded in `seen_txs`). A subsequent dispute on
     // that id must therefore surface `WithdrawalDispute`, not `TxNotFound`.
     let mut engine = Engine::new();

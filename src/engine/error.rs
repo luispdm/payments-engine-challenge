@@ -2,8 +2,7 @@
 //!
 //! The engine is side effect free: it returns structured errors and the
 //! driver loop in `main` decides which to surface and which to swallow per
-//! the spec's "ignore on partner error" rule. Variants are added incrementally
-//! as later tasks introduce more failure modes.
+//! the spec's "ignore on partner error" rule.
 
 use rust_decimal::Decimal;
 
@@ -61,8 +60,8 @@ pub enum EngineError {
         tx: u32,
     },
 
-    /// Dispute / resolve / chargeback event references a withdrawal; per Q1
-    /// withdrawals are not disputable.
+    /// Dispute / resolve / chargeback event references a withdrawal.
+    /// Withdrawals are not disputable.
     #[error("transaction {tx} for client {client}: withdrawals are not disputable")]
     WithdrawalDispute {
         /// Client id from the offending row.

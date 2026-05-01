@@ -11,15 +11,7 @@ use serde::Deserialize;
 use super::error::EngineError;
 
 /// Strongly typed transaction handed to [`super::Engine::process`].
-///
-/// Withdrawal, dispute, resolve and chargeback variants are recognised at
-/// task 01 so the parser never crashes on a well-formed CSV; the engine
-/// only acts on `Deposit` until later tasks wire up the rest.
-///
-/// `Clone` is derived so benchmark drivers can replay a pre-generated
-/// workload across multiple criterion iterations without re-running the
-/// generator inside the timed region.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Transaction {
     /// Credit `amount` to client's `available` and `total`.
     Deposit {
@@ -39,21 +31,21 @@ pub enum Transaction {
         /// Funds being debited.
         amount: Decimal,
     },
-    /// Open a dispute against an earlier deposit. No-op until task 03.
+    /// Open a dispute against an earlier deposit.
     Dispute {
         /// Client id.
         client: u16,
         /// Tx id of the disputed transaction.
         tx: u32,
     },
-    /// Close a dispute, releasing held funds. No-op until task 04.
+    /// Close a dispute, releasing held funds.
     Resolve {
         /// Client id.
         client: u16,
         /// Tx id of the resolved dispute.
         tx: u32,
     },
-    /// Reverse a disputed deposit and lock the account. No-op until task 05.
+    /// Reverse a disputed deposit and lock the account.
     Chargeback {
         /// Client id.
         client: u16,
