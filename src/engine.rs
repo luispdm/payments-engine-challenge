@@ -3,10 +3,10 @@
 //! Per-client account state lives in [`Engine`] alongside a split tx ledger
 //! that powers dispute lookup and cross-type tx-id dedup.
 //! Disputable deposits are kept in `HashMap<u32, DepositRecord>`.
-//! 
+//!
 //! Every tx id (deposit and withdrawal alike) is tracked in `HashSet<u32>`
 //! so withdrawal-vs-deposit collisions surface as `DuplicateTxId`.
-//! 
+//!
 //! Transaction parsing, errors and CSV glue live in submodules.
 
 use std::collections::hash_map::Entry;
@@ -136,7 +136,7 @@ impl Engine {
     }
 
     /// True when the `client`'s account has received a chargeback.
-    /// 
+    ///
     /// Takes the `accounts` map by reference (rather than `&self`)
     /// so `fn`s holding `&mut self.deposits` can split-borrow
     /// without conflicting on the whole `Engine`.
