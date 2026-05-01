@@ -1,14 +1,12 @@
 //! CSV serde glue.
 //!
 //! The driver is parameterized over a `process` closure rather than a
-//! method on [`super::Engine`] so concurrency variants can plug in
+//! method on [`super::Engine`] so other variants can plug in
 //! easily.
 //!
-//! Partner errors stay row-local: per-row CSV deserialize
-//! failures and engine errors that the spec instructs to ignore are
-//! logged via `log::warn!` and the pipeline continues. Underlying IO
-//! failures propagate through `anyhow::Context` because they are not
-//! row-local: recovery is the caller's job.
+//! Per-row CSV deserialize errors are not terminal: the pipeline continues.
+//! Underlying IO failures propagate through `anyhow::Context`
+//! because they are not row-local: recovery is the caller's job.
 
 use std::io::{Read, Write};
 
@@ -29,7 +27,7 @@ use super::transaction::{RawTransaction, Transaction};
 pub fn run<R: Read, W: Write>(input: R, output: W) -> anyhow::Result<()> {
     let mut engine = Engine::new();
     drive_input(input, |tx| engine.process(tx))?;
-    write_snapshots(output, engine.accounts())
+    write_output(output, engine.accounts())
 }
 
 /// Stream rows from `input` and feed each parsed [`Transaction`] to
@@ -53,10 +51,6 @@ where
         let raw = match result {
             Ok(raw) => raw,
             Err(err) => {
-                // IO errors below the csv layer are terminal: the input
-                // reader itself is gone and we have nothing left to drain.
-                // Per-row deserialize / framing errors are local to the bad
-                // row and the loop carries on.
                 if matches!(err.kind(), csv::ErrorKind::Io(_)) {
                     return Err(err).context("read CSV row");
                 }
@@ -79,12 +73,12 @@ where
 }
 
 /// Write the per-client snapshot to `output` with amounts at exactly four
-/// decimal places (Q6b).
+/// decimal places.
 ///
 /// # Errors
 ///
 /// Propagates failures from the underlying writer.
-pub fn write_snapshots<'a, W, I>(output: W, accounts: I) -> anyhow::Result<()>
+pub fn write_output<'a, W, I>(output: W, accounts: I) -> anyhow::Result<()>
 where
     W: Write,
     I: IntoIterator<Item = &'a Account>,
@@ -164,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn write_snapshots_should_format_amounts_to_four_decimal_places() {
+    fn write_output_should_format_amounts_to_four_decimal_places() {
         let mut engine = Engine::new();
         engine
             .process(Transaction::Deposit {
@@ -175,18 +169,18 @@ mod tests {
             .unwrap();
 
         let mut buf = Vec::new();
-        write_snapshots(&mut buf, engine.accounts()).unwrap();
+        write_output(&mut buf, engine.accounts()).unwrap();
         let out = String::from_utf8(buf).unwrap();
 
         assert!(out.contains("1.5000"), "output was: {out}");
     }
 
     #[test]
-    fn write_snapshots_should_emit_header_row() {
+    fn write_output_should_emit_header_row() {
         let engine = Engine::new();
 
         let mut buf = Vec::new();
-        write_snapshots(&mut buf, engine.accounts()).unwrap();
+        write_output(&mut buf, engine.accounts()).unwrap();
         let out = String::from_utf8(buf).unwrap();
 
         assert_eq!(out, "client,available,held,total,locked\n");
