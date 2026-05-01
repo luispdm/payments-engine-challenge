@@ -11,9 +11,11 @@ phase.
 ## How to
 
 ```sh
-cargo run --release -- transactions.csv > accounts.csv
+cargo run --release -- tests/samples/deposits_only.csv > accounts.csv
 cargo doc --document-private-items --open # check out the full project doc
 ```
+
+Please note that there's multiple csv files at tests/samples.
 
 ## Assumptions
 
