@@ -82,46 +82,57 @@ impl Engine {
     /// so the driver loop can log them to `log::warn!`.
     pub fn process(&mut self, tx: Transaction) -> Result<(), EngineError> {
         match tx {
-            Transaction::Deposit { client, tx, amount } => {
-                if amount <= Decimal::ZERO {
-                    return Err(EngineError::NonPositiveAmount { client, tx, amount });
-                }
-                if Self::account_locked(&self.accounts, client) {
-                    return Err(EngineError::AccountLocked { client, tx });
-                }
-                if !self.seen_txs.insert(tx) {
-                    return Err(EngineError::DuplicateTxId { client, tx });
-                }
-                self.deposits.insert(tx, DepositRecord::new(client, amount));
-                self.accounts
-                    .entry(client)
-                    .or_insert_with(|| Account::new(client))
-                    .apply_deposit(amount);
-                Ok(())
-            }
+            Transaction::Deposit { client, tx, amount } => self.apply_deposit(client, tx, amount),
             Transaction::Withdrawal { client, tx, amount } => {
-                if amount <= Decimal::ZERO {
-                    return Err(EngineError::NonPositiveAmount { client, tx, amount });
-                }
-                if Self::account_locked(&self.accounts, client) {
-                    return Err(EngineError::AccountLocked { client, tx });
-                }
-                if !self.seen_txs.insert(tx) {
-                    return Err(EngineError::DuplicateTxId { client, tx });
-                }
-                // Reserve the tx id before attempting the debit: an insufficient-funds
-                // rejection still consumes the id (this was a genuine attempt by the
-                // caller)
-                self.accounts
-                    .entry(client)
-                    .or_insert_with(|| Account::new(client))
-                    .apply_withdrawal(amount)
-                    .map_err(|_| EngineError::InsufficientFunds { client, tx, amount })
+                self.apply_withdrawal(client, tx, amount)
             }
             Transaction::Dispute { client, tx } => self.apply_dispute(client, tx),
             Transaction::Resolve { client, tx } => self.apply_resolve(client, tx),
             Transaction::Chargeback { client, tx } => self.apply_chargeback(client, tx),
         }
+    }
+
+    fn apply_deposit(&mut self, client: u16, tx: u32, amount: Decimal) -> Result<(), EngineError> {
+        if amount <= Decimal::ZERO {
+            return Err(EngineError::NonPositiveAmount { client, tx, amount });
+        }
+        if Self::account_locked(&self.accounts, client) {
+            return Err(EngineError::AccountLocked { client, tx });
+        }
+        if !self.seen_txs.insert(tx) {
+            return Err(EngineError::DuplicateTxId { client, tx });
+        }
+        self.deposits.insert(tx, DepositRecord::new(client, amount));
+        self.accounts
+            .entry(client)
+            .or_insert_with(|| Account::new(client))
+            .apply_deposit(amount);
+        Ok(())
+    }
+
+    fn apply_withdrawal(
+        &mut self,
+        client: u16,
+        tx: u32,
+        amount: Decimal,
+    ) -> Result<(), EngineError> {
+        if amount <= Decimal::ZERO {
+            return Err(EngineError::NonPositiveAmount { client, tx, amount });
+        }
+        if Self::account_locked(&self.accounts, client) {
+            return Err(EngineError::AccountLocked { client, tx });
+        }
+        // Reserve the tx id before attempting the debit: an insufficient-funds
+        // rejection still consumes the id (this was a genuine attempt by the
+        // caller)
+        if !self.seen_txs.insert(tx) {
+            return Err(EngineError::DuplicateTxId { client, tx });
+        }
+        self.accounts
+            .entry(client)
+            .or_insert_with(|| Account::new(client))
+            .apply_withdrawal(amount)
+            .map_err(|_| EngineError::InsufficientFunds { client, tx, amount })
     }
 
     /// True when the `client`'s account has received a chargeback.
