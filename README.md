@@ -66,8 +66,8 @@ single-threaded baseline is preferable because thread spawn cost
 dominates the work.
 
 For further details, check:
-- [Data structure storage layouts](docs/data-structures-benchmarks.md)
-- [Concurrency models](docs/concurrency-benchmarks.md)
+- [Data structure bench doc](docs/data-structures-benchmarks.md)
+- [Concurrency bench doc](docs/concurrency-benchmarks.md)
 - [Data structure bench code](https://github.com/luispdm/payments-engine-challenge/pull/8)
 - [Concurrency bench code](https://github.com/luispdm/payments-engine-challenge/pull/9)
 
