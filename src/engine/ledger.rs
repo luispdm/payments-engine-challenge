@@ -5,13 +5,13 @@
 //! dispute lifecycle. Withdrawals are tracked solely in the engine's
 //! `seen_txs` set: they are not disputable, so no fields beyond the
 //! tx id itself are needed; presence in the set powers cross-type tx-id
-//! dedup (6a).
+//! dedup.
 
 use rust_decimal::Decimal;
 
 /// Lifecycle state of a deposit with respect to disputes.
 ///
-/// `ChargedBack` is terminal: per Q5 a charged-back tx accepts no further
+/// `ChargedBack` is terminal: a charged-back tx accepts no further
 /// dispute events.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum DisputeState {
@@ -69,9 +69,9 @@ impl DepositRecord {
     /// # Errors
     ///
     /// - [`DisputeRejection::AlreadyDisputed`] when the record is currently
-    ///   in `Disputed` state. Per Q5 the redundant dispute is a no-op.
+    ///   in `Disputed` state. The redundant dispute is a no-op.
     /// - [`DisputeRejection::ChargedBack`] when the record is in the terminal
-    ///   `ChargedBack` state. Per Q5 a charged-back tx cannot be re-disputed.
+    ///   `ChargedBack` state. A charged-back tx cannot be re-disputed.
     ///
     /// State is left untouched in either error case.
     pub fn try_dispute(&mut self) -> Result<Decimal, DisputeRejection> {
@@ -87,7 +87,7 @@ impl DepositRecord {
 
     /// Transition `Disputed -> NotDisputed` and return the released amount.
     ///
-    /// Per Q5 a resolved record is behaviorally identical to one that was
+    /// A resolved record is behaviorally identical to one that was
     /// never disputed, so the state machine drops back to `NotDisputed` and
     /// a future dispute on the same tx is allowed.
     ///
@@ -105,7 +105,7 @@ impl DepositRecord {
 
     /// Transition `Disputed -> ChargedBack` and return the reversed amount.
     ///
-    /// Terminal transition: per Q5 a charged-back record never moves again,
+    /// Terminal transition: a charged-back record never moves again,
     /// so a follow-up `dispute`, `resolve`, or `chargeback` on the same tx
     /// is always a partner error.
     ///

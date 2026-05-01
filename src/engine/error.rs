@@ -71,7 +71,7 @@ pub enum EngineError {
     },
 
     /// Dispute event fired against a tx that is already in `Disputed`
-    /// state. Per Q5 this is a no-op (idempotent).
+    /// state. This is a no-op (idempotent).
     #[error("transaction {tx} for client {client}: already disputed")]
     AlreadyDisputed {
         /// Client id from the offending row.
@@ -101,7 +101,7 @@ pub enum EngineError {
     },
 
     /// Dispute event fired against a tx in the terminal `ChargedBack` state.
-    /// Per Q5 a charged-back tx accepts no further dispute lifecycle events.
+    /// A charged-back tx accepts no further dispute lifecycle events.
     #[error("transaction {tx} for client {client}: tx already charged back")]
     ChargedBack {
         /// Client id from the offending row.
@@ -111,7 +111,7 @@ pub enum EngineError {
     },
 
     /// Deposit, withdrawal, or new dispute targeted an account locked by a
-    /// previous chargeback. Per Q2 only resolves and chargebacks on disputes
+    /// previous chargeback. Only resolves and chargebacks on disputes
     /// opened before the lock continue to process.
     #[error("transaction {tx} for client {client}: account is locked")]
     AccountLocked {
@@ -122,7 +122,7 @@ pub enum EngineError {
     },
 
     /// Deposit or withdrawal row reused a tx id that has already been seen.
-    /// Per 6a tx ids are deduped across types: a deposit and a withdrawal
+    /// Tx ids are deduped across types: a deposit and a withdrawal
     /// sharing an id collide just as two deposits do. The second event is
     /// rejected and never touches account state.
     #[error("transaction {tx} for client {client}: duplicate tx id")]

@@ -360,7 +360,7 @@ fn process_should_return_client_mismatch_when_resolve_client_differs_from_deposi
 
 #[test]
 fn process_should_hold_funds_again_when_dispute_fires_after_resolve() {
-    // Per Q5 a deposit may be re-disputed after resolve.
+    // A deposit may be re-disputed after resolve.
     let mut engine = Engine::new();
     deposit_and_dispute(&mut engine, 1, 1, "10.0000");
     engine
@@ -535,7 +535,7 @@ fn process_should_return_account_locked_when_withdrawal_targets_locked_account()
 fn process_should_return_account_locked_when_new_dispute_targets_locked_account() {
     // Deposit tx 2 stays undisputed at lock time; the dispute on tx 1
     // locks the account; the dispute on tx 2 is a new dispute and must be
-    // rejected per Q2.
+    // rejected.
     let mut engine = Engine::new();
     engine
         .process(Transaction::Deposit {
@@ -561,7 +561,7 @@ fn process_should_return_account_locked_when_new_dispute_targets_locked_account(
 
 #[test]
 fn process_should_release_held_when_resolve_targets_disputed_tx_on_locked_account() {
-    // Per Q2 a resolve on a tx already in `Disputed` is allowed even on a
+    // A resolve on a tx already in `Disputed` is allowed even on a
     // locked account: the dispute pre-dates the lock.
     let mut engine = Engine::new();
     deposit_and_dispute(&mut engine, 1, 1, "10.0000");
@@ -582,7 +582,7 @@ fn process_should_release_held_when_resolve_targets_disputed_tx_on_locked_accoun
 
 #[test]
 fn process_should_drop_held_when_chargeback_targets_disputed_tx_on_locked_account() {
-    // Per Q2 a chargeback on a tx already in `Disputed` is allowed even on
+    // A chargeback on a tx already in `Disputed` is allowed even on
     // a locked account: settles a pre-lock dispute.
     let mut engine = Engine::new();
     deposit_and_dispute(&mut engine, 1, 1, "10.0000");
@@ -603,7 +603,7 @@ fn process_should_drop_held_when_chargeback_targets_disputed_tx_on_locked_accoun
 
 #[test]
 fn process_should_drive_total_negative_when_fraud_sequence_charges_back() {
-    // Q3 fraud sequence: deposit 100, withdraw 80, dispute, chargeback.
+    // Fraud sequence: deposit 100, withdraw 80, dispute, chargeback.
     let mut engine = Engine::new();
     engine
         .process(Transaction::Deposit {
@@ -939,7 +939,7 @@ fn process_should_leave_state_untouched_when_deposit_amount_non_positive() {
 
 #[test]
 fn process_should_accept_subsequent_deposit_reusing_id_after_non_positive_rejection() {
-    // Tx id stays free after a non-positive rejection (task 06), so the
+    // Tx id stays free after a non-positive rejection, so the
     // corrected retry succeeds.
     let mut engine = Engine::new();
 
@@ -1071,7 +1071,7 @@ fn process_should_accept_subsequent_withdrawal_reusing_id_after_non_positive_rej
 
 #[test]
 fn process_should_record_withdrawal_tx_id_even_when_insufficient_funds_rejects() {
-    // Per 6a the failed withdrawal still consumes its tx id (recorded in
+    // The failed withdrawal still consumes its tx id (recorded in
     // `seen_txs`), so a retry with the same id is flagged as duplicate.
     let mut engine = Engine::new();
 

@@ -67,9 +67,9 @@ impl Engine {
     /// - [`EngineError::WithdrawalDispute`] when a dispute / resolve /
     ///   chargeback references a withdrawal (not disputable).
     /// - [`EngineError::AlreadyDisputed`] when a dispute fires against a tx
-    ///   already in `Disputed` state (idempotent re-dispute, per Q5).
+    ///   already in `Disputed` state (idempotent re-dispute).
     /// - [`EngineError::ChargedBack`] when a dispute fires against a tx in
-    ///   the terminal `ChargedBack` state (per Q5 the tx is settled).
+    ///   the terminal `ChargedBack` state (the tx is settled).
     /// - [`EngineError::NotDisputed`] when a resolve or chargeback fires
     ///   against a tx that is not currently in `Disputed` state. Includes
     ///   already-charged-back txs.
@@ -117,7 +117,7 @@ impl Engine {
                 // not disputable, so they never enter `deposits`)
                 // before attempting the debit; an insufficient-funds
                 // rejection still consumes the id, matching the "globally
-                // unique tx ids" rule from 6a.
+                // unique tx ids" rule.
                 self.accounts
                     .entry(client)
                     .or_insert_with(|| Account::new(client))
@@ -152,7 +152,7 @@ impl Engine {
         }
         // Falling through here means the deposit map has no entry; the tx
         // either does not exist at all or names a withdrawal (only tracked
-        // in `seen_txs` per 6a).
+        // in `seen_txs`).
         if seen_txs.contains(&tx) {
             Err(EngineError::WithdrawalDispute { client, tx })
         } else {
@@ -165,7 +165,7 @@ impl Engine {
         if deposit.client() != client {
             return Err(EngineError::ClientMismatch { client, tx });
         }
-        // Per Q2 only *new* disputes (state == NotDisputed) are blocked once
+        // Only *new* disputes (state == NotDisputed) are blocked once
         // the account is locked. Disputed and ChargedBack states fall
         // through to their own state-level errors below.
         if deposit.state() == DisputeState::NotDisputed
@@ -177,7 +177,7 @@ impl Engine {
             DisputeRejection::AlreadyDisputed => EngineError::AlreadyDisputed { client, tx },
             DisputeRejection::ChargedBack => EngineError::ChargedBack { client, tx },
         })?;
-        // Per Q3 a hold may drive `available` negative; using `entry` keeps
+        // A hold may drive `available` negative; using `entry` keeps
         // the engine sound even if a future change breaks the
         // deposit-creates-account invariant.
         self.accounts
@@ -210,7 +210,7 @@ impl Engine {
         let amount = deposit
             .try_chargeback()
             .map_err(|_| EngineError::NotDisputed { client, tx })?;
-        // Per Q2 a chargeback on a tx already in `Disputed` is permitted
+        // A chargeback on a tx already in `Disputed` is permitted
         // even if the account is locked, so no lock check here.
         self.accounts
             .entry(client)

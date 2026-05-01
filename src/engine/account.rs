@@ -84,7 +84,7 @@ impl Account {
     }
 
     /// Move `amount` from `available` to `held`. `total` (derived) is
-    /// unchanged. Per Q3 a hold may drive `available` negative; that
+    /// unchanged. A hold may drive `available` negative; that
     /// correctly models post-fraud exposure and preserves the
     /// `total = available + held` invariant.
     pub fn apply_hold(&mut self, amount: Decimal) {
@@ -105,7 +105,7 @@ impl Account {
     /// Reverse a held deposit and lock the account.
     ///
     /// Drops `amount` from `held` without crediting `available`, so `total`
-    /// (derived) decreases by `amount`. Per Q3 nothing is clamped: if a
+    /// (derived) decreases by `amount`. Nothing is clamped: if a
     /// withdrawal had already drained the deposited funds, `available` is
     /// already negative and stays negative, correctly modelling post-fraud
     /// exposure.
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn apply_hold_should_drive_available_negative_when_amount_exceeds_balance() {
-        // Per Q3, holds may take `available` below zero so the
+        // Holds may take `available` below zero so the
         // `total = available + held` invariant survives post-fraud states.
         let mut acct = Account::new(1);
         acct.apply_deposit("1.0000".parse().unwrap());
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn apply_chargeback_should_drive_total_negative_for_fraud_sequence() {
-        // Fraud sequence per Q3: deposit then withdraw, then chargeback
+        // Fraud sequence: deposit then withdraw, then chargeback
         // reverses the original credit. `available` was already drained so
         // the chargeback drops it past zero.
         let mut acct = Account::new(1);

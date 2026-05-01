@@ -94,7 +94,7 @@ resolve,1,1,
 
 #[test]
 fn redispute_after_resolve_should_hold_funds_again_in_snapshot() {
-    // Per Q5 a deposit may be re-disputed after resolve. End state has 10.0
+    // A deposit may be re-disputed after resolve. End state has 10.0
     // held and 0 available, identical to a single-dispute run.
     let input = "\
 type,client,tx,amount
@@ -143,7 +143,7 @@ chargeback,1,1,
 
 #[test]
 fn fraud_sequence_should_drive_balance_negative_in_snapshot() {
-    // Per Q3, a deposit that gets withdrawn before being charged back drives
+    // A deposit that gets withdrawn before being charged back drives
     // total below zero, modelling the platform's exposure post-fraud.
     let input = "\
 type,client,tx,amount
@@ -173,7 +173,7 @@ deposit,1,3,2.5000
 
 #[test]
 fn duplicate_tx_ids_should_apply_only_first_event_in_snapshot() {
-    // Per 6a the second event reusing tx 1 is rejected. The cross-type
+    // The second event reusing tx 1 is rejected. The cross-type
     // collision on tx 2 (deposit then withdrawal with the same id) leaves
     // the deposit's funds untouched.
     let input = "\
@@ -228,7 +228,7 @@ deposit,1,2,4.0000
 
 #[test]
 fn prior_dispute_resolve_should_still_succeed_after_lock_in_snapshot() {
-    // Per Q2, a resolve on a tx already in `Disputed` state is allowed even
+    // A resolve on a tx already in `Disputed` state is allowed even
     // after a different dispute's chargeback locked the account. Client 1
     // has tx 1 (charged back, locks account) and tx 2 (disputed before lock,
     // resolved after).
