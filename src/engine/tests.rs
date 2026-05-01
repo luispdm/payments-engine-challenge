@@ -681,7 +681,7 @@ fn process_should_return_withdrawal_dispute_when_dispute_targets_withdrawal() {
 
 #[test]
 fn process_should_return_withdrawal_dispute_when_resolve_targets_withdrawal() {
-    // `deposit_mut` is shared across dispute / resolve / chargeback paths; a
+    // `get_deposit` is shared across dispute / resolve / chargeback paths; a
     // resolve aimed at a withdrawal tx must surface `WithdrawalDispute` for
     // the same reason a dispute does.
     let mut engine = Engine::new();
@@ -712,7 +712,7 @@ fn process_should_return_withdrawal_dispute_when_resolve_targets_withdrawal() {
 
 #[test]
 fn process_should_return_withdrawal_dispute_when_chargeback_targets_withdrawal() {
-    // Same shared-`deposit_mut` rule as resolve-on-withdrawal: a chargeback
+    // Same shared-`get_deposit` rule as resolve-on-withdrawal: a chargeback
     // aimed at a withdrawal tx surfaces `WithdrawalDispute`.
     let mut engine = Engine::new();
     engine
@@ -1097,9 +1097,7 @@ fn process_should_record_withdrawal_tx_id_even_when_insufficient_funds_rejects()
 
 #[test]
 fn process_should_keep_deposits_subset_of_seen_txs_through_mixed_events() {
-    // Pins the structural invariant that powers `deposit_mut`'s
-    // disambiguation: every key in `deposits` is also in `seen_txs`. Mixed
-    // sequence below drives every kind of mutation we have, including
+    // Mixed sequence below drives every kind of mutation we have, including
     // failed withdrawals, duplicates, mismatches, locks, and the full
     // dispute lifecycle, so a regression in any handler that desyncs the
     // two collections gets caught.

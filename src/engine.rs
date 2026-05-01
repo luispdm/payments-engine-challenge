@@ -1,11 +1,13 @@
 //! In-memory payments engine.
 //!
 //! Per-client account state lives in [`Engine`] alongside a split tx ledger
-//! that powers dispute lookup and cross-type tx-id dedup. Disputable
-//! deposits are kept in `HashMap<u32, DepositRecord>`; every tx id (deposit
-//! and withdrawal alike) is tracked in `HashSet<u32>` so withdrawal-vs-deposit
-//! collisions surface as `DuplicateTxId`. Transaction parsing, errors and
-//! CSV glue live in submodules.
+//! that powers dispute lookup and cross-type tx-id dedup.
+//! Disputable deposits are kept in `HashMap<u32, DepositRecord>`.
+//! 
+//! Every tx id (deposit and withdrawal alike) is tracked in `HashSet<u32>`
+//! so withdrawal-vs-deposit collisions surface as `DuplicateTxId`.
+//! 
+//! Transaction parsing, errors and CSV glue live in submodules.
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -44,13 +46,12 @@ impl Engine {
 
     /// Apply `tx` to the engine state.
     ///
-    /// All five transaction kinds are wired in. Lock semantics: once an
-    /// account has been frozen by a chargeback, subsequent deposits,
-    /// withdrawals, and *new* disputes are rejected. Resolves and chargebacks
-    /// targeting txs already in `Disputed` state still process so disputes
-    /// opened before the freeze can settle. The engine also dedups
-    /// every deposit / withdrawal tx id across types: a second event reusing
-    /// an existing id is rejected without touching account state.
+    /// Lock semantics: once an account has been frozen by a chargeback,
+    /// subsequent deposits, withdrawals, and *new* disputes are rejected.
+    /// Resolves and chargebacks targeting txs already in `Disputed` state
+    /// still process so disputes opened before the freeze can settle.
+    /// The engine also dedups every deposit / withdrawal tx id across types:
+    /// a second event reusing an existing id is rejected without touching account state.
     ///
     /// # Errors
     ///
@@ -60,12 +61,11 @@ impl Engine {
     /// - [`EngineError::InsufficientFunds`] when a withdrawal would drive
     ///   `available` below zero.
     /// - [`EngineError::DuplicateTxId`] when a deposit or withdrawal reuses
-    ///   a tx id already present in the ledger (deposit/deposit,
-    ///   withdrawal/withdrawal, or cross-type collision).
+    ///   a tx id already present in the ledger.
     /// - [`EngineError::TxNotFound`] when a dispute / resolve / chargeback
     ///   references an unknown tx id.
     /// - [`EngineError::WithdrawalDispute`] when a dispute / resolve /
-    ///   chargeback references a withdrawal (not disputable).
+    ///   chargeback references a withdrawal.
     /// - [`EngineError::AlreadyDisputed`] when a dispute fires against a tx
     ///   already in `Disputed` state (idempotent re-dispute).
     /// - [`EngineError::ChargedBack`] when a dispute fires against a tx in
@@ -79,7 +79,7 @@ impl Engine {
     ///   dispute targets an account locked by a prior chargeback.
     ///
     /// Per spec the driver swallows all of the above; variants are returned
-    /// so the driver loop can downgrade them to `log::warn!`.
+    /// so the driver loop can log them to `log::warn!`.
     pub fn process(&mut self, tx: Transaction) -> Result<(), EngineError> {
         match tx {
             Transaction::Deposit { client, tx, amount } => {
@@ -92,10 +92,6 @@ impl Engine {
                 if !self.seen_txs.insert(tx) {
                     return Err(EngineError::DuplicateTxId { client, tx });
                 }
-                // Record the deposit before mutating the account so the
-                // ordering matches the withdrawal handler; deposits cannot
-                // fail at the account layer so the rollback path is
-                // unreachable.
                 self.deposits.insert(tx, DepositRecord::new(client, amount));
                 self.accounts
                     .entry(client)
@@ -113,11 +109,9 @@ impl Engine {
                 if !self.seen_txs.insert(tx) {
                     return Err(EngineError::DuplicateTxId { client, tx });
                 }
-                // Reserve the tx id (in `seen_txs` only — withdrawals are
-                // not disputable, so they never enter `deposits`)
-                // before attempting the debit; an insufficient-funds
-                // rejection still consumes the id, matching the "globally
-                // unique tx ids" rule.
+                // Reserve the tx id before attempting the debit: an insufficient-funds
+                // rejection still consumes the id (this was a genuine attempt by the
+                // caller)
                 self.accounts
                     .entry(client)
                     .or_insert_with(|| Account::new(client))
@@ -130,18 +124,19 @@ impl Engine {
         }
     }
 
-    /// True when `client` has an account that a prior chargeback locked.
-    /// Unseen clients are unlocked by definition. Takes the `accounts` map by
-    /// reference (rather than `&self`) so call sites holding `&mut self.deposits`
-    /// can split-borrow without conflicting on the whole `Engine`.
+    /// True when the `client`'s account has received a chargeback.
+    /// 
+    /// Takes the `accounts` map by reference (rather than `&self`)
+    /// so `fn`s holding `&mut self.deposits` can split-borrow
+    /// without conflicting on the whole `Engine`.
     fn account_locked(accounts: &HashMap<u16, Account>, client: u16) -> bool {
         accounts.get(&client).is_some_and(Account::locked)
     }
 
     /// Resolve a dispute-lifecycle event's target tx id to a deposit
     /// record. Returns the appropriate "not-disputable" error if the id is
-    /// unknown or names a withdrawal.
-    fn deposit_mut<'a>(
+    /// unknown or references a withdrawal.
+    fn get_deposit<'a>(
         deposits: &'a mut HashMap<u32, DepositRecord>,
         seen_txs: &HashSet<u32>,
         client: u16,
@@ -150,9 +145,8 @@ impl Engine {
         if let Entry::Occupied(slot) = deposits.entry(tx) {
             return Ok(slot.into_mut());
         }
-        // Falling through here means the deposit map has no entry; the tx
-        // either does not exist at all or names a withdrawal (only tracked
-        // in `seen_txs`).
+        // At this point the tx either does not exist at all or
+        // it is referencing a withdrawal (only tracked in `seen_txs`).
         if seen_txs.contains(&tx) {
             Err(EngineError::WithdrawalDispute { client, tx })
         } else {
@@ -161,13 +155,11 @@ impl Engine {
     }
 
     fn apply_dispute(&mut self, client: u16, tx: u32) -> Result<(), EngineError> {
-        let deposit = Self::deposit_mut(&mut self.deposits, &self.seen_txs, client, tx)?;
+        let deposit = Self::get_deposit(&mut self.deposits, &self.seen_txs, client, tx)?;
         if deposit.client() != client {
             return Err(EngineError::ClientMismatch { client, tx });
         }
-        // Only *new* disputes (state == NotDisputed) are blocked once
-        // the account is locked. Disputed and ChargedBack states fall
-        // through to their own state-level errors below.
+        // New disputes are blocked if the account is locked.
         if deposit.state() == DisputeState::NotDisputed
             && Self::account_locked(&self.accounts, client)
         {
@@ -177,9 +169,8 @@ impl Engine {
             DisputeRejection::AlreadyDisputed => EngineError::AlreadyDisputed { client, tx },
             DisputeRejection::ChargedBack => EngineError::ChargedBack { client, tx },
         })?;
-        // A hold may drive `available` negative; using `entry` keeps
-        // the engine sound even if a future change breaks the
-        // deposit-creates-account invariant.
+        // The account already exists here, but we are not using `unwrap`
+        // to avoid panicking in case the code changes in the future
         self.accounts
             .entry(client)
             .or_insert_with(|| Account::new(client))
@@ -188,13 +179,15 @@ impl Engine {
     }
 
     fn apply_resolve(&mut self, client: u16, tx: u32) -> Result<(), EngineError> {
-        let deposit = Self::deposit_mut(&mut self.deposits, &self.seen_txs, client, tx)?;
+        let deposit = Self::get_deposit(&mut self.deposits, &self.seen_txs, client, tx)?;
         if deposit.client() != client {
             return Err(EngineError::ClientMismatch { client, tx });
         }
         let amount = deposit
             .try_resolve()
             .map_err(|_| EngineError::NotDisputed { client, tx })?;
+        // The account already exists here, but we are not using `unwrap`
+        // to avoid panicking in case the code changes in the future
         self.accounts
             .entry(client)
             .or_insert_with(|| Account::new(client))
@@ -203,7 +196,7 @@ impl Engine {
     }
 
     fn apply_chargeback(&mut self, client: u16, tx: u32) -> Result<(), EngineError> {
-        let deposit = Self::deposit_mut(&mut self.deposits, &self.seen_txs, client, tx)?;
+        let deposit = Self::get_deposit(&mut self.deposits, &self.seen_txs, client, tx)?;
         if deposit.client() != client {
             return Err(EngineError::ClientMismatch { client, tx });
         }

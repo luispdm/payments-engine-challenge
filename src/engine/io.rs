@@ -1,13 +1,12 @@
 //! CSV serde glue.
 //!
 //! The driver is parameterized over a `process` closure rather than a
-//! method on [`super::Engine`] so future concurrency variants can plug in
-//! without sharing a trait surface (per the engine-swap decision in
-//! `~/payments-engine-challenge-docs/decisions.md`).
+//! method on [`super::Engine`] so concurrency variants can plug in
+//! easily.
 //!
 //! Partner errors stay row-local: per-row CSV deserialize
 //! failures and engine errors that the spec instructs to ignore are
-//! downgraded to `log::warn!` and the pipeline continues. Underlying IO
+//! logged via `log::warn!` and the pipeline continues. Underlying IO
 //! failures propagate through `anyhow::Context` because they are not
 //! row-local: recovery is the caller's job.
 
