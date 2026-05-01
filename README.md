@@ -86,8 +86,8 @@ phases to catch regressions.
 
 ## Known limitations
 
-- **Single-threaded engine on `main`.** In production, a sharded app on
-  `client_id` spread on many instances would be a better fit.
+- **Single-threaded engine on `main`.** In production, sharding on
+  `client_id` to spread processing of the CSV rows on multiple threads would be a better fit.
 - **All state in memory.** Account state and every tx id
   ever seen are kept in process memory. Again, I wouldn't do this in
   production. In a real-world scenario I would offload this
