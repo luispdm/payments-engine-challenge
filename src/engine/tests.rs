@@ -680,6 +680,89 @@ fn process_should_return_withdrawal_dispute_when_dispute_targets_withdrawal() {
 }
 
 #[test]
+fn process_should_return_withdrawal_dispute_when_resolve_targets_withdrawal() {
+    // `deposit_mut` is shared across dispute / resolve / chargeback paths; a
+    // resolve aimed at a withdrawal tx must surface `WithdrawalDispute` for
+    // the same reason a dispute does.
+    let mut engine = Engine::new();
+    engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "10.0000".parse().unwrap(),
+        })
+        .unwrap();
+    engine
+        .process(Transaction::Withdrawal {
+            client: 1,
+            tx: 2,
+            amount: "1.0000".parse().unwrap(),
+        })
+        .unwrap();
+
+    let err = engine
+        .process(Transaction::Resolve { client: 1, tx: 2 })
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        EngineError::WithdrawalDispute { client: 1, tx: 2 }
+    ));
+}
+
+#[test]
+fn process_should_return_withdrawal_dispute_when_chargeback_targets_withdrawal() {
+    // Same shared-`deposit_mut` rule as resolve-on-withdrawal: a chargeback
+    // aimed at a withdrawal tx surfaces `WithdrawalDispute`.
+    let mut engine = Engine::new();
+    engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "10.0000".parse().unwrap(),
+        })
+        .unwrap();
+    engine
+        .process(Transaction::Withdrawal {
+            client: 1,
+            tx: 2,
+            amount: "1.0000".parse().unwrap(),
+        })
+        .unwrap();
+
+    let err = engine
+        .process(Transaction::Chargeback { client: 1, tx: 2 })
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        EngineError::WithdrawalDispute { client: 1, tx: 2 }
+    ));
+}
+
+#[test]
+fn process_should_return_withdrawal_dispute_when_dispute_targets_failed_withdrawal_id() {
+    // Per task 06 a withdrawal that fails for `InsufficientFunds` still
+    // consumes its tx id (recorded in `seen_txs`). A subsequent dispute on
+    // that id must therefore surface `WithdrawalDispute`, not `TxNotFound`.
+    let mut engine = Engine::new();
+    let _ = engine.process(Transaction::Withdrawal {
+        client: 1,
+        tx: 1,
+        amount: "5.0000".parse().unwrap(),
+    });
+
+    let err = engine
+        .process(Transaction::Dispute { client: 1, tx: 1 })
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        EngineError::WithdrawalDispute { client: 1, tx: 1 }
+    ));
+}
+
+#[test]
 fn process_should_return_duplicate_tx_id_when_deposit_reuses_existing_deposit_id() {
     let mut engine = Engine::new();
     engine
@@ -938,6 +1021,55 @@ fn process_should_return_non_positive_amount_when_withdrawal_amount_is_zero() {
 }
 
 #[test]
+fn process_should_leave_state_untouched_when_withdrawal_amount_non_positive() {
+    // Mirror of the deposit-side parity test: a non-positive withdrawal is
+    // a malformed row, not a recordable attempt. No account auto-created,
+    // no tx id consumed in `seen_txs`.
+    let mut engine = Engine::new();
+
+    let _ = engine.process(Transaction::Withdrawal {
+        client: 1,
+        tx: 1,
+        amount: "-3.0000".parse().unwrap(),
+    });
+
+    assert!(!engine.accounts.contains_key(&1));
+    assert!(!engine.seen_txs.contains(&1));
+}
+
+#[test]
+fn process_should_accept_subsequent_withdrawal_reusing_id_after_non_positive_rejection() {
+    // Tx id stays free after a non-positive withdrawal rejection, so a
+    // corrected retry on the same id succeeds.
+    let mut engine = Engine::new();
+    engine
+        .process(Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "10.0000".parse().unwrap(),
+        })
+        .unwrap();
+
+    let _ = engine.process(Transaction::Withdrawal {
+        client: 1,
+        tx: 2,
+        amount: "-3.0000".parse().unwrap(),
+    });
+    engine
+        .process(Transaction::Withdrawal {
+            client: 1,
+            tx: 2,
+            amount: "4.0000".parse().unwrap(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        account_for(&engine, 1).available(),
+        "6.0000".parse::<Decimal>().unwrap()
+    );
+}
+
+#[test]
 fn process_should_record_withdrawal_tx_id_even_when_insufficient_funds_rejects() {
     // Per 6a the failed withdrawal still consumes its tx id (recorded in
     // `seen_txs`), so a retry with the same id is flagged as duplicate.
@@ -961,4 +1093,72 @@ fn process_should_record_withdrawal_tx_id_even_when_insufficient_funds_rejects()
         err,
         EngineError::DuplicateTxId { client: 1, tx: 1 }
     ));
+}
+
+#[test]
+fn process_should_keep_deposits_subset_of_seen_txs_through_mixed_events() {
+    // Pins the structural invariant that powers `deposit_mut`'s
+    // disambiguation: every key in `deposits` is also in `seen_txs`. Mixed
+    // sequence below drives every kind of mutation we have, including
+    // failed withdrawals, duplicates, mismatches, locks, and the full
+    // dispute lifecycle, so a regression in any handler that desyncs the
+    // two collections gets caught.
+    let mut engine = Engine::new();
+    let events = [
+        Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "10.0000".parse().unwrap(),
+        },
+        Transaction::Deposit {
+            client: 2,
+            tx: 2,
+            amount: "5.0000".parse().unwrap(),
+        },
+        Transaction::Withdrawal {
+            client: 1,
+            tx: 3,
+            amount: "2.0000".parse().unwrap(),
+        },
+        // Insufficient funds: tx id still consumed in `seen_txs`.
+        Transaction::Withdrawal {
+            client: 2,
+            tx: 4,
+            amount: "100.0000".parse().unwrap(),
+        },
+        // Duplicate tx id: rejected without adding to either collection.
+        Transaction::Deposit {
+            client: 1,
+            tx: 1,
+            amount: "1.0000".parse().unwrap(),
+        },
+        // Client mismatch: rejected without adding either way.
+        Transaction::Dispute { client: 9, tx: 2 },
+        // Full lifecycle on tx 1.
+        Transaction::Dispute { client: 1, tx: 1 },
+        Transaction::Resolve { client: 1, tx: 1 },
+        Transaction::Dispute { client: 1, tx: 1 },
+        Transaction::Chargeback { client: 1, tx: 1 },
+        // Post-lock attempts.
+        Transaction::Deposit {
+            client: 1,
+            tx: 5,
+            amount: "1.0000".parse().unwrap(),
+        },
+        Transaction::Withdrawal {
+            client: 1,
+            tx: 6,
+            amount: "1.0000".parse().unwrap(),
+        },
+    ];
+    for event in events {
+        let _ = engine.process(event);
+    }
+
+    for tx in engine.deposits.keys() {
+        assert!(
+            engine.seen_txs.contains(tx),
+            "invariant violated: tx {tx} in deposits but not seen_txs"
+        );
+    }
 }
