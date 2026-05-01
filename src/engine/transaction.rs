@@ -1,9 +1,8 @@
 //! Transaction event types.
 //!
-//! [`Transaction`] is the engine's input vocabulary. The CSV pipeline
-//! deserializes each row into a [`RawTransaction`] and converts it into a
-//! [`Transaction`], surfacing partner errors (unknown type, missing amount)
-//! as [`EngineError`] variants the driver loop can ignore per spec.
+//! The CSV pipeline deserializes each row into a [`RawTransaction`]
+//! and converts it into a [`Transaction`]. Using [`EngineError`] variants
+//! for unknown transactions or transactions missing the amount.
 
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -54,8 +53,8 @@ pub enum Transaction {
     },
 }
 
-/// CSV-shaped row before validation. The csv crate deserializes directly
-/// into this; conversion to [`Transaction`] enforces invariants.
+/// CSV row before validation. The csv crate deserializes directly
+/// into this. Conversion to [`Transaction`] enforces invariants.
 #[derive(Debug, Deserialize)]
 pub struct RawTransaction {
     /// Transaction kind: `deposit`, `withdrawal`, `dispute`, `resolve`, `chargeback`.
@@ -65,7 +64,7 @@ pub struct RawTransaction {
     pub client: u16,
     /// Globally unique tx id.
     pub tx: u32,
-    /// Optional amount; required for deposit / withdrawal, absent otherwise.
+    /// Optional amount required for deposit / withdrawal, absent otherwise.
     pub amount: Option<Decimal>,
 }
 
@@ -80,8 +79,6 @@ impl TryFrom<RawTransaction> for Transaction {
             amount,
         } = raw;
 
-        // Match on the lowercased kind so `Deposit`, `WITHDRAWAL`, etc. do not
-        // silently get dropped as `UnknownTransactionType` by the driver loop.
         match kind.to_ascii_lowercase().as_str() {
             "deposit" => {
                 let amount = amount.ok_or(EngineError::MissingAmount { tx })?;
