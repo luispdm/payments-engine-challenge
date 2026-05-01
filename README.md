@@ -8,12 +8,10 @@ This challenge has been completed with the assistance of Claude Code.
 The AI tool has been used during both the design and the development
 phase.
 
-## Build, run, test
+## How to
 
 ```sh
-cargo build --release
 cargo run --release -- transactions.csv > accounts.csv
-cargo test
 cargo doc --document-private-items --open # check out the full project doc
 ```
 
@@ -82,10 +80,13 @@ For further details, check:
   backed by a DB lookup to rule out false positives.
 - **No durability.** A crash mid-run loses partial state. This can be
   mitigated with different strategies, one being a write-ahead log.
+- **No checked math.** In the finance world, overflows and underflows
+  are a disaster. In production, I would use `checked_add` and
+  `checked_sub`
 
 ## Potential improvements
 
 - TCP server bundling to test async runtimes.
 - clippy lint rules.
 - `rstest` to for a better unit tests organization.
-- macros to reduce the engine LoC.
+- macros to reduce `engine` LoC.
