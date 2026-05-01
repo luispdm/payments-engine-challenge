@@ -6,7 +6,8 @@ account snapshot CSV out, dispute lifecycle implemented end to end.
 ## AI USAGE DISCLAIMER
 
 This challenge has been completed with the assistance of Claude Code.
-The AI tool has been used during both the design and development phase.
+The AI tool has been used during both the design and the development
+phase.
 
 ## Build, run, test
 
@@ -47,7 +48,7 @@ cargo doc --document-private-items --open # check out the full project doc
 
 ## Benchmarks
 
-Benchmarks ran on an AMD Ryzen 7 7900 and 32 GB of RAM.
+Benchmarks ran on an AMD Ryzen 9 7900 and 32 GB of RAM.
 
 Two benchmark suites probed the design space: the conclusions shaped
 the production engine.
