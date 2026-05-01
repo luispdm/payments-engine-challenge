@@ -1,7 +1,6 @@
 # payments-engine-challenge
 
-Rust solution to the payments engine challenge. CSV in, per-client
-account snapshot CSV out, dispute lifecycle implemented end to end.
+Solution to the payments engine challenge.
 
 ## AI USAGE DISCLAIMER
 
