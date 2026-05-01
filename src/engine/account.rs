@@ -1,10 +1,9 @@
 //! Per-client account state.
 //!
 //! Balances are stored as [`rust_decimal::Decimal`] for exact 4-decimal
-//! arithmetic. The invariant `total == available + held` is enforced by
-//! construction: `total` is a derived view computed from `available + held`,
-//! never a stored field. All mutation goes through methods on this type so
-//! the invariant cannot drift.
+//! arithmetic. The invariant `total == available + held` is a derived view
+//! computed from `available + held`, not a stored field.
+//! All mutation go through methods on this type so the invariant cannot drift.
 
 use rust_decimal::Decimal;
 
@@ -13,11 +12,7 @@ use rust_decimal::Decimal;
 /// Fields are private; readers go through accessor methods. This keeps every
 /// mutation in one place and avoids callers desyncing the `total` view from
 /// `available + held`.
-///
-/// `Clone` is derived so benchmark drivers can dump a final-state snapshot
-/// for cross-engine equivalence checks; the type stays cheap to copy
-/// (24 bytes plus a `Decimal` pair, well under the 512-byte heuristic).
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Account {
     client: u16,
     available: Decimal,
@@ -61,20 +56,17 @@ impl Account {
         self.locked
     }
 
-    /// Credit `amount` to `available`. `held` is unchanged, so `total`
-    /// (derived) increases by `amount`.
+    /// Credit `amount` to `available`.
     pub fn apply_deposit(&mut self, amount: Decimal) {
         self.available += amount;
     }
 
-    /// Debit `amount` from `available`. `held` is unchanged, so `total`
-    /// (derived) decreases by `amount`.
+    /// Debit `amount` from `available`.
     ///
     /// # Errors
     ///
     /// Returns [`InsufficientFunds`] when `amount > available`. Balances are
-    /// left untouched in that case so the caller can ignore or log per the
-    /// spec's silent-rejection rule.
+    /// left untouched in this case.
     pub fn apply_withdrawal(&mut self, amount: Decimal) -> Result<(), InsufficientFunds> {
         if amount > self.available {
             return Err(InsufficientFunds);
@@ -83,20 +75,19 @@ impl Account {
         Ok(())
     }
 
-    /// Move `amount` from `available` to `held`. `total` (derived) is
-    /// unchanged. A hold may drive `available` negative; that
-    /// correctly models post-fraud exposure and preserves the
-    /// `total = available + held` invariant.
+    /// Move `amount` from `available` to `held`. A hold may drive
+    /// `available` negative: that correctly models post-fraud exposure
+    /// and preserves the `total = available + held` invariant.
     pub fn apply_hold(&mut self, amount: Decimal) {
         self.available -= amount;
         self.held += amount;
     }
 
     /// Inverse of [`Account::apply_hold`]: move `amount` from `held` back to
-    /// `available`. `total` (derived) is unchanged. Callers are expected to
-    /// pass an `amount` backed by a prior matching hold; passing `amount >
-    /// held` violates that contract and drives `held` negative, but the
-    /// `total = available + held` invariant still holds.
+    /// `available`. Callers are expected to pass an `amount` backed by a
+    /// prior matching hold. Passing `amount > held` violates that contract
+    /// and drives `held` negative, but the `total = available + held` invariant
+    /// still holds.
     pub fn apply_release(&mut self, amount: Decimal) {
         self.held -= amount;
         self.available += amount;
@@ -105,10 +96,9 @@ impl Account {
     /// Reverse a held deposit and lock the account.
     ///
     /// Drops `amount` from `held` without crediting `available`, so `total`
-    /// (derived) decreases by `amount`. Nothing is clamped: if a
-    /// withdrawal had already drained the deposited funds, `available` is
-    /// already negative and stays negative, correctly modelling post-fraud
-    /// exposure.
+    /// decreases by `amount`. Nothing is clamped: if a withdrawal had already
+    /// drained the deposited funds, `available` is already negative and
+    /// stays negative, correctly modelling post-fraud exposure.
     pub fn apply_chargeback(&mut self, amount: Decimal) {
         self.held -= amount;
         self.locked = true;
