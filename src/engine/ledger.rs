@@ -2,10 +2,7 @@
 //!
 //! The engine retains a copy of every deposit so later dispute events can
 //! recover the original client and amount, cross-check them, and walk the
-//! dispute lifecycle. Withdrawals are tracked solely in the engine's
-//! `seen_txs` set: they are not disputable, so no fields beyond the
-//! tx id itself are needed; presence in the set powers cross-type tx-id
-//! dedup.
+//! dispute lifecycle. Withdrawals are not disputable.
 
 use rust_decimal::Decimal;
 
@@ -27,7 +24,7 @@ pub enum DisputeState {
 /// Stored snapshot of a deposit, sufficient to service the dispute
 /// lifecycle without re-reading the input.
 ///
-/// Fields are private; mutation goes through the typed transition methods so
+/// Fields are private: mutations go through the methods so
 /// the state machine cannot be skipped.
 #[derive(Debug, PartialEq, Eq)]
 pub struct DepositRecord {
@@ -46,7 +43,7 @@ impl DepositRecord {
         }
     }
 
-    /// Client that originally made the deposit.
+    /// Client the deposit belongs to.
     pub fn client(&self) -> u16 {
         self.client
     }
@@ -56,21 +53,18 @@ impl DepositRecord {
         self.amount
     }
 
-    /// Current dispute lifecycle state.
+    /// Current dispute state.
     pub fn state(&self) -> DisputeState {
         self.state
     }
 
     /// Transition `NotDisputed -> Disputed` and return the held amount.
     ///
-    /// Owning the check + setter pair on the record keeps the rule in one
-    /// place; `try_resolve` and `try_chargeback` follow the same shape.
-    ///
     /// # Errors
     ///
     /// - [`DisputeRejection::AlreadyDisputed`] when the record is currently
     ///   in `Disputed` state. The redundant dispute is a no-op.
-    /// - [`DisputeRejection::ChargedBack`] when the record is in the terminal
+    /// - [`DisputeRejection::ChargedBack`] when the record is in the
     ///   `ChargedBack` state. A charged-back tx cannot be re-disputed.
     ///
     /// State is left untouched in either error case.
@@ -107,7 +101,7 @@ impl DepositRecord {
     ///
     /// Terminal transition: a charged-back record never moves again,
     /// so a follow-up `dispute`, `resolve`, or `chargeback` on the same tx
-    /// is always a partner error.
+    /// is always an error.
     ///
     /// # Errors
     ///
@@ -125,7 +119,7 @@ impl DepositRecord {
 
 /// Returned by [`DepositRecord::try_dispute`] when the record's current state
 /// rules out a new dispute. The engine maps each variant to a distinct
-/// [`super::error::EngineError`] so logging can distinguish "double dispute"
+/// [`super::error::EngineError`] so the caller can distinguish "double dispute"
 /// from "dispute on terminal tx".
 #[derive(Debug, PartialEq, Eq)]
 pub enum DisputeRejection {
