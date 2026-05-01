@@ -1,8 +1,7 @@
 //! Engine error variants.
 //!
 //! The engine is side effect free: it returns structured errors and the
-//! driver loop in `main` decides which to surface and which to swallow per
-//! the spec's "ignore on partner error" rule.
+//! driver loop in `main` decides which to surface and which to swallow.
 
 use rust_decimal::Decimal;
 
@@ -34,11 +33,7 @@ pub enum EngineError {
         amount: Decimal,
     },
 
-    /// Deposit or withdrawal row carries a non-positive amount (`<= 0`).
-    /// A negative deposit drives `available` negative without going through
-    /// the dispute machinery; a negative withdrawal flips its sign and
-    /// credits the account out of thin air. Both are structurally
-    /// nonsensical and rejected before the tx id is recorded, so the id
+    /// Deposit or withdrawal carries a non-positive amount (`<= 0`).
     /// stays free for a corrected retry.
     #[error("transaction {tx} for client {client}: amount {amount} must be strictly positive")]
     NonPositiveAmount {
@@ -81,7 +76,7 @@ pub enum EngineError {
     },
 
     /// Resolve / chargeback event fired against a tx that is not currently
-    /// in `Disputed` state. Per spec the row is a partner error and ignored.
+    /// in `Disputed` state.
     #[error("transaction {tx} for client {client}: not currently disputed")]
     NotDisputed {
         /// Client id from the offending row.
@@ -122,9 +117,7 @@ pub enum EngineError {
     },
 
     /// Deposit or withdrawal row reused a tx id that has already been seen.
-    /// Tx ids are deduped across types: a deposit and a withdrawal
-    /// sharing an id collide just as two deposits do. The second event is
-    /// rejected and never touches account state.
+    /// The second event is rejected and never touches account state.
     #[error("transaction {tx} for client {client}: duplicate tx id")]
     DuplicateTxId {
         /// Client id from the offending row.
