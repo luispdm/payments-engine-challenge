@@ -3,14 +3,62 @@ name = "payments-engine-challenge"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Pulls in the synthetic workload generator, the concurrency variants, and
+# exposes the bench binaries. Off by default so the production build stays
+# free of benchmark code paths and dependencies.
+bench = [
+    "dep:rand",
+    "dep:libc",
+    "dep:dashmap",
+    "dep:crossbeam",
+    "dep:hdrhistogram",
+]
+
 [dependencies]
 anyhow = "1"
+crossbeam = { version = "0.8", optional = true }
 csv = "1"
+dashmap = { version = "6", optional = true }
 env_logger = "0.11"
+hdrhistogram = { version = "7", optional = true }
+libc = { version = "0.2", optional = true }
 log = "0.4"
+rand = { version = "0.10", optional = true }
 rust_decimal = { version = "1", features = ["serde-str"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 
 [dev-dependencies]
+criterion = "0.8"
 insta = "1"
+
+[[bench]]
+name = "throughput"
+harness = false
+required-features = ["bench"]
+
+[[bin]]
+name = "bench_baseline"
+path = "src/bin/bench_baseline.rs"
+required-features = ["bench"]
+
+[[bin]]
+name = "bench_mutex"
+path = "src/bin/bench_mutex.rs"
+required-features = ["bench"]
+
+[[bin]]
+name = "bench_dashmap"
+path = "src/bin/bench_dashmap.rs"
+required-features = ["bench"]
+
+[[bin]]
+name = "bench_actor_std"
+path = "src/bin/bench_actor_std.rs"
+required-features = ["bench"]
+
+[[bin]]
+name = "bench_actor_crossbeam"
+path = "src/bin/bench_actor_crossbeam.rs"
+required-features = ["bench"]

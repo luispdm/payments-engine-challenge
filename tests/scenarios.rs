@@ -3,6 +3,14 @@
 //! Snapshots are normalised by sorting data rows on `client` before
 //! recording, so the spec's "output order is unconstrained" property does
 //! not surface as snapshot churn.
+//!
+//! With `--features bench`, every scenario also runs through each of
+//! the five concurrency variants and asserts byte-equality with the
+//! production engine's output. That satisfies task 07b's "every variant
+//! must pass the unit + integration test suite from tasks 01-06
+//! unchanged" requirement: the integration tests here are the suite,
+//! and the cross-variant assert is a single function each scenario
+//! calls.
 
 use payments_engine_challenge::run;
 
@@ -23,9 +31,49 @@ fn normalise(raw: &str) -> String {
 }
 
 fn run_and_normalise(input: &str) -> String {
+    let oracle = run_and_normalise_with(input, |i, o| run(i, o));
+    cross_variant_check(input, &oracle);
+    oracle
+}
+
+fn run_and_normalise_with<R>(input: &str, run_variant: R) -> String
+where
+    R: FnOnce(&[u8], &mut Vec<u8>) -> anyhow::Result<()>,
+{
     let mut out = Vec::new();
-    run(input.as_bytes(), &mut out).unwrap();
+    run_variant(input.as_bytes(), &mut out).unwrap();
     normalise(&String::from_utf8(out).unwrap())
+}
+
+#[cfg(not(feature = "bench"))]
+fn cross_variant_check(_input: &str, _oracle: &str) {
+    // Concurrency variants live behind the `bench` feature; without it
+    // we only exercise the production engine.
+}
+
+#[cfg(feature = "bench")]
+type VariantRunner = fn(&[u8], &mut Vec<u8>) -> anyhow::Result<()>;
+
+#[cfg(feature = "bench")]
+fn cross_variant_check(input: &str, oracle: &str) {
+    use payments_engine_challenge::concurrency::{
+        actor_crossbeam, actor_std, baseline, dashmap_engine, mutex,
+    };
+
+    let cases: [(&str, VariantRunner); 5] = [
+        ("baseline", |i, o| baseline::run(i, o)),
+        ("mutex", |i, o| mutex::run(i, o)),
+        ("dashmap", |i, o| dashmap_engine::run(i, o)),
+        ("actor_std", |i, o| actor_std::run(i, o)),
+        ("actor_crossbeam", |i, o| actor_crossbeam::run(i, o)),
+    ];
+    for (name, run_fn) in cases {
+        let got = run_and_normalise_with(input, run_fn);
+        assert_eq!(
+            got, oracle,
+            "concurrency variant `{name}` diverged from production engine output",
+        );
+    }
 }
 
 #[test]

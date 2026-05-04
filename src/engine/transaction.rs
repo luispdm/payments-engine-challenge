@@ -10,7 +10,11 @@ use serde::Deserialize;
 use super::error::EngineError;
 
 /// Strongly typed transaction handed to [`super::Engine::process`].
-#[derive(Debug, PartialEq, Eq)]
+///
+/// `Clone` is derived so the bench harness can replay a pre-generated
+/// workload across multiple criterion iterations without re-running the
+/// synthetic generator each time.
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Transaction {
     /// Credit `amount` to client's `available` and `total`.
     Deposit {

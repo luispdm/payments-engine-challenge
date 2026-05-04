@@ -12,7 +12,10 @@ use rust_decimal::Decimal;
 /// Fields are private; readers go through accessor methods. This keeps every
 /// mutation in one place and avoids callers desyncing the `total` view from
 /// `available + held`.
-#[derive(Debug, PartialEq, Eq)]
+///
+/// `Clone` is derived for the bench harness, which dumps final-state
+/// snapshots to compare concurrency variants against the production engine.
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Account {
     client: u16,
     available: Decimal,
