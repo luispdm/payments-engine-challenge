@@ -8,13 +8,6 @@ use rust_decimal::Decimal;
 /// Errors produced while parsing input rows or processing transactions.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
-    /// Row's `type` column does not match any known transaction kind.
-    #[error("unknown transaction type: {kind}")]
-    UnknownTransactionType {
-        /// Raw value of the `type` column.
-        kind: String,
-    },
-
     /// Deposit or withdrawal row arrived without an `amount` column.
     #[error("transaction {tx} is missing the amount column")]
     MissingAmount {

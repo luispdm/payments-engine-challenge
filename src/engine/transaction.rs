@@ -1,13 +1,70 @@
 //! Transaction event types.
 //!
 //! The CSV pipeline deserializes each row into a [`RawTransaction`]
-//! and converts it into a [`Transaction`]. Using [`EngineError`] variants
-//! for unknown transactions or transactions missing the amount.
+//! and converts it into a [`Transaction`]. Unknown kinds fail at the
+//! deserialize boundary; [`EngineError::MissingAmount`] is the only
+//! row-level error this module raises.
+
+use std::fmt;
 
 use rust_decimal::Decimal;
-use serde::Deserialize;
+use serde::{
+    Deserialize,
+    de::{self, Deserializer, Visitor},
+};
 
 use super::error::EngineError;
+
+/// Strongly typed `type` column. Parsed once at the deserialize boundary
+/// with case-insensitive matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransactionKind {
+    Deposit,
+    Withdrawal,
+    Dispute,
+    Resolve,
+    Chargeback,
+}
+
+const KIND_VARIANTS: &[&str] = &["deposit", "withdrawal", "dispute", "resolve", "chargeback"];
+
+impl<'de> Deserialize<'de> for TransactionKind {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct KindVisitor;
+
+        impl<'de> Visitor<'de> for KindVisitor {
+            type Value = TransactionKind;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("one of: deposit, withdrawal, dispute, resolve, chargeback")
+            }
+
+            fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                match s {
+                    s if s.eq_ignore_ascii_case("deposit") => Ok(TransactionKind::Deposit),
+                    s if s.eq_ignore_ascii_case("withdrawal") => Ok(TransactionKind::Withdrawal),
+                    s if s.eq_ignore_ascii_case("dispute") => Ok(TransactionKind::Dispute),
+                    s if s.eq_ignore_ascii_case("resolve") => Ok(TransactionKind::Resolve),
+                    s if s.eq_ignore_ascii_case("chargeback") => Ok(TransactionKind::Chargeback),
+                    other => Err(E::unknown_variant(other, KIND_VARIANTS)),
+                }
+            }
+        }
+
+        d.deserialize_str(KindVisitor)
+
+        // ----------- alternative implementation -----------
+        // let s = <&str>::deserialize(d)?;
+        // match s {
+        //     s if s.eq_ignore_ascii_case("deposit")    => Ok(Self::Deposit),
+        //     s if s.eq_ignore_ascii_case("withdrawal") => Ok(Self::Withdrawal),
+        //     s if s.eq_ignore_ascii_case("dispute")    => Ok(Self::Dispute),
+        //     s if s.eq_ignore_ascii_case("resolve")    => Ok(Self::Resolve),
+        //     s if s.eq_ignore_ascii_case("chargeback") => Ok(Self::Chargeback),
+        //     other => Err(de::Error::unknown_variant(other, KIND_VARIANTS)),
+        // }
+    }
+}
 
 /// Strongly typed transaction handed to [`super::Engine::process`].
 #[derive(Debug, PartialEq, Eq)]
@@ -57,9 +114,8 @@ pub enum Transaction {
 /// into this. Conversion to [`Transaction`] enforces invariants.
 #[derive(Debug, Deserialize)]
 pub struct RawTransaction {
-    /// Transaction kind: `deposit`, `withdrawal`, `dispute`, `resolve`, `chargeback`.
     #[serde(rename = "type")]
-    pub kind: String,
+    pub kind: TransactionKind,
     /// Client id.
     pub client: u16,
     /// Globally unique tx id.
@@ -73,26 +129,24 @@ impl TryFrom<RawTransaction> for Transaction {
 
     fn try_from(raw: RawTransaction) -> Result<Self, Self::Error> {
         let RawTransaction {
-            mut kind,
+            kind,
             client,
             tx,
             amount,
         } = raw;
-        kind.make_ascii_lowercase();
 
-        match kind.as_str() {
-            "deposit" => {
+        match kind {
+            TransactionKind::Deposit => {
                 let amount = amount.ok_or(EngineError::MissingAmount { tx })?;
                 Ok(Transaction::Deposit { client, tx, amount })
             }
-            "withdrawal" => {
+            TransactionKind::Withdrawal => {
                 let amount = amount.ok_or(EngineError::MissingAmount { tx })?;
                 Ok(Transaction::Withdrawal { client, tx, amount })
             }
-            "dispute" => Ok(Transaction::Dispute { client, tx }),
-            "resolve" => Ok(Transaction::Resolve { client, tx }),
-            "chargeback" => Ok(Transaction::Chargeback { client, tx }),
-            _ => Err(EngineError::UnknownTransactionType { kind }),
+            TransactionKind::Dispute => Ok(Transaction::Dispute { client, tx }),
+            TransactionKind::Resolve => Ok(Transaction::Resolve { client, tx }),
+            TransactionKind::Chargeback => Ok(Transaction::Chargeback { client, tx }),
         }
     }
 }
@@ -101,9 +155,9 @@ impl TryFrom<RawTransaction> for Transaction {
 mod tests {
     use super::*;
 
-    fn raw(kind: &str, amount: Option<&str>) -> RawTransaction {
+    fn raw(kind: TransactionKind, amount: Option<&str>) -> RawTransaction {
         RawTransaction {
-            kind: kind.to_string(),
+            kind,
             client: 1,
             tx: 42,
             amount: amount.map(|a| a.parse().unwrap()),
@@ -112,7 +166,7 @@ mod tests {
 
     #[test]
     fn try_from_should_build_deposit_when_kind_is_deposit() {
-        let tx = Transaction::try_from(raw("deposit", Some("10.5000"))).unwrap();
+        let tx = Transaction::try_from(raw(TransactionKind::Deposit, Some("10.5000"))).unwrap();
 
         assert_eq!(
             tx,
@@ -126,64 +180,77 @@ mod tests {
 
     #[test]
     fn try_from_should_build_withdrawal_when_kind_is_withdrawal() {
-        let tx = Transaction::try_from(raw("withdrawal", Some("3.0000"))).unwrap();
+        let tx = Transaction::try_from(raw(TransactionKind::Withdrawal, Some("3.0000"))).unwrap();
 
         assert!(matches!(tx, Transaction::Withdrawal { .. }));
     }
 
     #[test]
     fn try_from_should_build_dispute_when_kind_is_dispute() {
-        let tx = Transaction::try_from(raw("dispute", None)).unwrap();
+        let tx = Transaction::try_from(raw(TransactionKind::Dispute, None)).unwrap();
 
         assert_eq!(tx, Transaction::Dispute { client: 1, tx: 42 });
     }
 
     #[test]
     fn try_from_should_build_resolve_when_kind_is_resolve() {
-        let tx = Transaction::try_from(raw("resolve", None)).unwrap();
+        let tx = Transaction::try_from(raw(TransactionKind::Resolve, None)).unwrap();
 
         assert_eq!(tx, Transaction::Resolve { client: 1, tx: 42 });
     }
 
     #[test]
     fn try_from_should_build_chargeback_when_kind_is_chargeback() {
-        let tx = Transaction::try_from(raw("chargeback", None)).unwrap();
+        let tx = Transaction::try_from(raw(TransactionKind::Chargeback, None)).unwrap();
 
         assert_eq!(tx, Transaction::Chargeback { client: 1, tx: 42 });
     }
 
     #[test]
     fn try_from_should_return_missing_amount_when_deposit_has_no_amount() {
-        let err = Transaction::try_from(raw("deposit", None)).unwrap_err();
+        let err = Transaction::try_from(raw(TransactionKind::Deposit, None)).unwrap_err();
 
         assert!(matches!(err, EngineError::MissingAmount { tx: 42 }));
     }
 
     #[test]
     fn try_from_should_return_missing_amount_when_withdrawal_has_no_amount() {
-        let err = Transaction::try_from(raw("withdrawal", None)).unwrap_err();
+        let err = Transaction::try_from(raw(TransactionKind::Withdrawal, None)).unwrap_err();
 
         assert!(matches!(err, EngineError::MissingAmount { tx: 42 }));
     }
 
-    #[test]
-    fn try_from_should_return_unknown_type_when_kind_is_unknown() {
-        let err = Transaction::try_from(raw("transfer", None)).unwrap_err();
+    #[derive(Deserialize)]
+    struct Holder {
+        kind: TransactionKind,
+    }
 
-        assert!(matches!(err, EngineError::UnknownTransactionType { .. }));
+    fn parse_kind(s: &str) -> Result<TransactionKind, csv::Error> {
+        let csv = format!("kind\n{s}\n");
+        let mut rdr = csv::Reader::from_reader(csv.as_bytes());
+        rdr.deserialize::<Holder>().next().unwrap().map(|h| h.kind)
     }
 
     #[test]
-    fn try_from_should_accept_uppercase_kind() {
-        let tx = Transaction::try_from(raw("DEPOSIT", Some("1.0000"))).unwrap();
-
-        assert!(matches!(tx, Transaction::Deposit { .. }));
+    fn deserialize_should_accept_lowercase_kind() {
+        assert_eq!(parse_kind("deposit").unwrap(), TransactionKind::Deposit);
     }
 
     #[test]
-    fn try_from_should_accept_mixed_case_kind() {
-        let tx = Transaction::try_from(raw("ChargeBack", None)).unwrap();
+    fn deserialize_should_accept_uppercase_kind() {
+        assert_eq!(parse_kind("DEPOSIT").unwrap(), TransactionKind::Deposit);
+    }
 
-        assert_eq!(tx, Transaction::Chargeback { client: 1, tx: 42 });
+    #[test]
+    fn deserialize_should_accept_mixed_case_kind() {
+        assert_eq!(
+            parse_kind("ChargeBack").unwrap(),
+            TransactionKind::Chargeback
+        );
+    }
+
+    #[test]
+    fn deserialize_should_reject_unknown_kind() {
+        assert!(parse_kind("transfer").is_err());
     }
 }

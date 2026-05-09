@@ -133,6 +133,17 @@ mod tests {
     }
 
     #[test]
+    fn drive_input_should_accept_uppercase_kind() {
+        let engine = run_csv(
+            "type,client,tx,amount\n\
+             DEPOSIT,1,1,10.0000\n",
+        );
+
+        let acct = engine.accounts().next().unwrap();
+        assert_eq!(acct.available(), "10.0000".parse::<Decimal>().unwrap());
+    }
+
+    #[test]
     fn drive_input_should_skip_unknown_row_type() {
         let engine = run_csv(
             "type,client,tx,amount\n\
